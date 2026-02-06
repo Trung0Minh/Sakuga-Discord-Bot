@@ -33,7 +33,7 @@ class Quiz(commands.Cog):
         """
         Displays a help message explaining commands and game modes.
         """
-        embed = discord.Embed(title="Sakuga Bot Help", color=0x00ff00)
+        embed = discord.Embed(title="Pekuga Bot Help", color=0x00ff00)
         
         embed.add_field(name="/quiz", value=(
             "Start a new quiz game.\n"
