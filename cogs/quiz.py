@@ -28,6 +28,41 @@ class Quiz(commands.Cog):
         embed.description = description
         await interaction.response.send_message(embed=embed)
 
+    @app_commands.command(name="help", description="Show instructions on how to use the bot")
+    async def help(self, interaction: discord.Interaction):
+        """
+        Displays a help message explaining commands and game modes.
+        """
+        embed = discord.Embed(title="Sakuga Bot Help", color=0x00ff00)
+        
+        embed.add_field(name="/quiz", value=(
+            "Start a new quiz game.\n"
+            "**Options:**\n"
+            "- `tags`: Space-separated Sakugabooru tags (e.g., `explosions effects`).\n"
+            "- `rounds`: Number of rounds (max 20).\n"
+            "- `players`: Mention friends to whitelist them (e.g., `@Friend1`).\n"
+            "- `mode`: Choose between Normal, Strict, Blind, or Hardcore."
+        ), inline=False)
+
+        embed.add_field(name="/g", value=(
+            "Guess the animator. **Required in Blind/Hardcore modes**.\n"
+            "Usage: `/g name: Yutaka Nakamura`"
+        ), inline=False)
+
+        embed.add_field(name="Game Modes", value=(
+            "**Normal**: Standard guessing in chat.\n"
+            "**Strict**: Deducts 0.5 points for every wrong guess.\n"
+            "**Blind**: Guesses are hidden from other players (must use `/g`).\n"
+            "**Hardcore**: Combines Strict and Blind modes."
+        ), inline=False)
+
+        embed.add_field(name="Other Commands", value=(
+            "`/leaderboard`: View the all-time high scores.\n"
+            "`/cancel`: Cancel the current game (Creator only)."
+        ), inline=False)
+
+        await interaction.response.send_message(embed=embed)
+
     @app_commands.command(name="cancel", description="Cancel the current quiz in this channel")
     async def cancel(self, interaction: discord.Interaction):
         session = self.game_manager.get_session(interaction.channel_id)
