@@ -46,7 +46,7 @@ class Quiz(commands.Cog):
 
         embed.add_field(name="/g", value=(
             "Guess the animator. **Required in Blind/Hardcore modes**.\n"
-            "Usage: `/g name: Yutaka Nakamura`"
+            "Usage: `/g name: Yucato thanh hóa`"
         ), inline=False)
 
         embed.add_field(name="Game Modes", value=(
@@ -130,7 +130,7 @@ class Quiz(commands.Cog):
     )
     @app_commands.choices(mode=[
         app_commands.Choice(name="Normal", value="normal"),
-        app_commands.Choice(name="Strict", value="strict"),
+        app_commands.Choice(name="Strict (khắc chế sv Hs :tri:)", value="strict"),
         app_commands.Choice(name="Blind", value="blind"),
         app_commands.Choice(name="Hardcore", value="hardcore")
     ])
