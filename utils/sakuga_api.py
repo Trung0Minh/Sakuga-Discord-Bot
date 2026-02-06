@@ -11,6 +11,17 @@ class SakugaAPI:
     }
 
     @staticmethod
+    async def fetch_json(session, url, params=None):
+        """Helper to ensure responses are closed."""
+        try:
+            async with session.get(url, params=params, timeout=10) as response:
+                if response.status == 200:
+                    return await response.json(), None
+                return None, response.status
+        except Exception as e:
+            return None, str(e)
+
+    @staticmethod
     async def get_random_post(tags=None, exclude_ids=None):
         print(f"[DEBUG] Fetching post with tags: {tags}")
         if not tags:
@@ -31,49 +42,47 @@ class SakugaAPI:
         }
 
         async with aiohttp.ClientSession(headers=SakugaAPI.HEADERS) as session:
-            async with session.get(SakugaAPI.BASE_URL, params=params) as response:
-                if response.status != 200:
-                    print(f"[DEBUG] Sakugabooru API Error (Post): {response.status}")
-                    return None, "api_error"
-                
-                posts = await response.json()
-                print(f"[DEBUG] API returned {len(posts)} posts.")
-                if not posts:
-                    return None, "invalid_tags"
-                
-                video_posts = [p for p in posts if p.get('file_ext') in ['mp4', 'webm', 'gif']]
-                print(f"[DEBUG] {len(video_posts)} posts are videos.")
-                if not video_posts:
-                    return None, "no_videos"
-                
-                unique_posts = [p for p in video_posts if p.get('id') not in exclude_ids]
-                print(f"[DEBUG] {len(unique_posts)} unique video posts available.")
-                if not unique_posts:
-                    return None, "out_of_videos"
-                
-                selected = random.choice(unique_posts)
-                print(f"[DEBUG] Selected post ID: {selected.get('id')}")
-                return selected, None
+            data, error = await SakugaAPI.fetch_json(session, SakugaAPI.BASE_URL, params)
+            
+            if error:
+                print(f"[DEBUG] API Error (Post): {error}")
+                return None, "api_error"
+            
+            if not data:
+                return None, "invalid_tags"
+            
+            video_posts = [p for p in data if p.get('file_ext') in ['mp4', 'webm', 'gif']]
+            if not video_posts:
+                return None, "no_videos"
+            
+            unique_posts = [p for p in video_posts if p.get('id') not in exclude_ids]
+            if not unique_posts:
+                return None, "out_of_videos"
+            
+            selected = random.choice(unique_posts)
+            print(f"[DEBUG] Selected post ID: {selected.get('id')}")
+            return selected, None
 
     @staticmethod
     async def get_artist_from_tags(tag_string):
         tags = tag_string.split()
-        print(f"[DEBUG] Checking artists for tags: {tags}")
         metadata = {'animated', 'video', 'sound', 'presumed', 'artist_unknown', 'liquid', 'effects', 'fighting', 'backgrounds', 'explosions', 'hair', 'debris'}
         tags_to_check = [t for t in tags if t not in metadata]
         
         if not tags_to_check:
-            print("[DEBUG] No candidate tags for artist search.")
             return []
 
         artists = []
         async with aiohttp.ClientSession(headers=SakugaAPI.HEADERS) as session:
-            tasks = [session.get(f"{SakugaAPI.TAG_API}?name={urllib.parse.quote(t)}") for t in tags_to_check]
-            responses = await asyncio.gather(*tasks)
+            tasks = []
+            for t in tags_to_check:
+                url = f"{SakugaAPI.TAG_API}?name={urllib.parse.quote(t)}"
+                tasks.append(SakugaAPI.fetch_json(session, url))
+
+            results = await asyncio.gather(*tasks)
             
-            for i, resp in enumerate(responses):
-                if resp.status == 200:
-                    data = await resp.json()
+            for i, (data, error) in enumerate(results):
+                if data:
                     original_tag = tags_to_check[i]
                     for t in data:
                         if t['name'] == original_tag and t['type'] == 1:
@@ -91,12 +100,15 @@ class SakugaAPI:
             
         tag_map = {}
         async with aiohttp.ClientSession(headers=SakugaAPI.HEADERS) as session:
-            tasks = [session.get(f"{SakugaAPI.TAG_API}?name={urllib.parse.quote(t)}") for t in tags]
-            responses = await asyncio.gather(*tasks)
+            tasks = []
+            for t in tags:
+                url = f"{SakugaAPI.TAG_API}?name={urllib.parse.quote(t)}"
+                tasks.append(SakugaAPI.fetch_json(session, url))
+
+            results = await asyncio.gather(*tasks)
             
-            for i, resp in enumerate(responses):
-                if resp.status == 200:
-                    data = await resp.json()
+            for i, (data, error) in enumerate(results):
+                if data:
                     original_tag = tags[i]
                     for t in data:
                         if t['name'] == original_tag:
