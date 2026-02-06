@@ -26,9 +26,14 @@ class SakugaAPI:
             "tags": tags.strip()
         }
 
-        async with aiohttp.ClientSession() as session:
+        headers = {
+            "User-Agent": "SakugaQuizBot/1.0 (Discord Bot)"
+        }
+
+        async with aiohttp.ClientSession(headers=headers) as session:
             async with session.get(SakugaAPI.BASE_URL, params=params) as response:
                 if response.status != 200:
+                    print(f"Sakugabooru API Error: {response.status}")
                     return None, "api_error"
                 
                 posts = await response.json()
