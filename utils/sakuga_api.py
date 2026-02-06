@@ -12,6 +12,7 @@ class SakugaAPI:
 
     @staticmethod
     async def get_random_post(tags=None, exclude_ids=None):
+        print(f"[DEBUG] Fetching post with tags: {tags}")
         if not tags:
             tags = ""
         
@@ -32,30 +33,37 @@ class SakugaAPI:
         async with aiohttp.ClientSession(headers=SakugaAPI.HEADERS) as session:
             async with session.get(SakugaAPI.BASE_URL, params=params) as response:
                 if response.status != 200:
-                    print(f"Sakugabooru API Error (Post): {response.status}")
+                    print(f"[DEBUG] Sakugabooru API Error (Post): {response.status}")
                     return None, "api_error"
                 
                 posts = await response.json()
+                print(f"[DEBUG] API returned {len(posts)} posts.")
                 if not posts:
                     return None, "invalid_tags"
                 
                 video_posts = [p for p in posts if p.get('file_ext') in ['mp4', 'webm', 'gif']]
+                print(f"[DEBUG] {len(video_posts)} posts are videos.")
                 if not video_posts:
                     return None, "no_videos"
                 
                 unique_posts = [p for p in video_posts if p.get('id') not in exclude_ids]
+                print(f"[DEBUG] {len(unique_posts)} unique video posts available.")
                 if not unique_posts:
                     return None, "out_of_videos"
                 
-                return random.choice(unique_posts), None
+                selected = random.choice(unique_posts)
+                print(f"[DEBUG] Selected post ID: {selected.get('id')}")
+                return selected, None
 
     @staticmethod
     async def get_artist_from_tags(tag_string):
         tags = tag_string.split()
+        print(f"[DEBUG] Checking artists for tags: {tags}")
         metadata = {'animated', 'video', 'sound', 'presumed', 'artist_unknown', 'liquid', 'effects', 'fighting', 'backgrounds', 'explosions', 'hair', 'debris'}
         tags_to_check = [t for t in tags if t not in metadata]
         
         if not tags_to_check:
+            print("[DEBUG] No candidate tags for artist search.")
             return []
 
         artists = []
@@ -72,6 +80,7 @@ class SakugaAPI:
                             artists.append(t['name'].replace('_', ' '))
                             break
         
+        print(f"[DEBUG] Found artists: {artists}")
         return artists
 
     @staticmethod

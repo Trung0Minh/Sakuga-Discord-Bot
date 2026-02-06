@@ -6,11 +6,6 @@ from .db_manager import DatabaseManager
 
 db = DatabaseManager()
 
-# Forward declaration to avoid circular import issues if possible, 
-# but views imports session, so we import views inside start_round or check if needed.
-# Actually, standard pattern is to put View in separate file and import here.
-# We will do a local import inside the method if needed or handle circularity carefully.
-
 class GameSession:
     def __init__(self, channel_id, creator_id, players, rounds, tags, mode="normal"):
         self.channel_id = channel_id
@@ -64,14 +59,18 @@ class GameSession:
             await channel.send(f"Skip vote registered ({current}/{needed})")
 
     async def start_round(self, ctx):
+        print(f"[DEBUG] Starting Round {self.current_round + 1}")
         # Determine if we should end
         if self.current_round >= self.total_rounds:
+            print("[DEBUG] Game finished (rounds completed).")
             await self.end_game(ctx)
             return
 
         # Fetch video
+        print(f"[DEBUG] Fetching post for round {self.current_round + 1}...")
         post, error = await SakugaAPI.get_random_post(self.tags, exclude_ids=self.seen_post_ids)
         if error:
+            print(f"[DEBUG] Fetch error: {error}")
             if error == "invalid_tags":
                 await ctx.send(f"Invalid tags `{self.tags}`")
             elif error == "out_of_videos":
@@ -88,10 +87,11 @@ class GameSession:
             return
 
         # Identify artist
+        print(f"[DEBUG] Identifying artists for post {post['id']}...")
         artists = await SakugaAPI.get_artist_from_tags(post['tags'])
         
         if not artists:
-            # If no artist found, we don't increment round, we just try again with this post excluded
+            print(f"[DEBUG] No artists found for post {post['id']}. Retrying with another post.")
             self.seen_post_ids.append(post['id'])
             await self.start_round(ctx) 
             return
@@ -108,17 +108,21 @@ class GameSession:
         if not video_url:
             video_url = post.get('sample_url')
 
+        print(f"[DEBUG] Posting video: {video_url}")
         embed = discord.Embed(title=f"Round {self.current_round}/{self.total_rounds}", description="Guess the animator!", color=0x00ff00)
         
-        # Prepare View for Blind/Hardcore
         view = None
         if self.mode in ["blind", "hardcore"]:
-            from .views import GuessView # Local import to avoid circular dependency
+            from .views import GuessView
             view = GuessView(self)
             embed.set_footer(text="Blind Mode: Use /g <name> to guess!")
 
-        await ctx.send(embed=embed, view=view)
-        await ctx.send(video_url)
+        try:
+            await ctx.send(embed=embed, view=view)
+            await ctx.send(video_url)
+            print("[DEBUG] Round messages sent.")
+        except Exception as e:
+            print(f"[DEBUG] CRITICAL: Failed to send round message: {e}")
 
         # Start timer
         self.timeout_task = asyncio.create_task(self.round_timeout(ctx))
@@ -133,8 +137,6 @@ class GameSession:
             await self.start_round(ctx)
 
     async def check_answer(self, message):
-        # Only used for Text-based modes (Normal, Strict)
-        # In Blind/Hardcore, text answers are ignored or deleted (if someone types by mistake)
         if not self.is_waiting_for_answer:
             return False
 
@@ -142,7 +144,6 @@ class GameSession:
             return False
 
         if self.mode in ["blind", "hardcore"]:
-            # If someone types in blind mode, we delete it and warn them
             try:
                 await message.delete()
                 await message.channel.send(f"<@{message.author.id}>, use `/g` to guess in {self.mode.capitalize()} mode!", delete_after=3)
@@ -152,12 +153,10 @@ class GameSession:
 
         content = message.content.strip().lower()
         
-        # Handle Skip (Text command still allowed in normal modes)
         if content == "skip":
             await self.handle_skip(message.author, message.channel)
             return True
 
-        # Check correctness
         is_correct = False
         for artist in self.current_artists:
             if content == artist.lower():
@@ -168,7 +167,6 @@ class GameSession:
             await self.handle_correct_answer(message.author, message.channel)
             return True
         else:
-            # Wrong Answer Logic (Strict only, since Blind uses Modals)
             if self.mode == "strict":
                 self.scores[message.author.id] -= 0.5
                 self.deduct_global_points(message.author.id)
@@ -178,14 +176,12 @@ class GameSession:
         self.active = False
         self.is_waiting_for_answer = False
         
-        # Sort scores
         sorted_scores = sorted(self.scores.items(), key=lambda item: item[1], reverse=True)
         
         embed = discord.Embed(title="Game Over!", color=0xffd700)
         if sorted_scores:
             description = ""
             for i, (uid, score) in enumerate(sorted_scores, 1):
-                # We might not have the user object here if they left, but usually we do
                 description += f"{i}. <@{uid}> - {score} points\n"
             embed.description = description
         else:
@@ -195,7 +191,7 @@ class GameSession:
 
 class GameManager:
     def __init__(self):
-        self.sessions = {} # Channel ID -> GameSession
+        self.sessions = {}
 
     def create_session(self, channel_id, creator_id, players, rounds, tags, mode="normal"):
         if channel_id in self.sessions and self.sessions[channel_id].active:
