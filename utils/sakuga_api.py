@@ -6,6 +6,9 @@ import asyncio
 class SakugaAPI:
     BASE_URL = "https://sakugabooru.com/post.json"
     TAG_API = "https://sakugabooru.com/tag.json"
+    HEADERS = {
+        "User-Agent": "SakugaQuizBot/1.0 (Discord Bot; contact: your_discord_tag)"
+    }
 
     @staticmethod
     async def get_random_post(tags=None, exclude_ids=None):
@@ -22,30 +25,24 @@ class SakugaAPI:
             tags += " order:random"
 
         params = {
-            "limit": 100, # Increased limit to check for total existence
+            "limit": 100,
             "tags": tags.strip()
         }
 
-        headers = {
-            "User-Agent": "SakugaQuizBot/1.0 (Discord Bot)"
-        }
-
-        async with aiohttp.ClientSession(headers=headers) as session:
+        async with aiohttp.ClientSession(headers=SakugaAPI.HEADERS) as session:
             async with session.get(SakugaAPI.BASE_URL, params=params) as response:
                 if response.status != 200:
-                    print(f"Sakugabooru API Error: {response.status}")
+                    print(f"Sakugabooru API Error (Post): {response.status}")
                     return None, "api_error"
                 
                 posts = await response.json()
                 if not posts:
                     return None, "invalid_tags"
                 
-                # Filter for videos
                 video_posts = [p for p in posts if p.get('file_ext') in ['mp4', 'webm', 'gif']]
                 if not video_posts:
                     return None, "no_videos"
                 
-                # Filter for unique ones
                 unique_posts = [p for p in video_posts if p.get('id') not in exclude_ids]
                 if not unique_posts:
                     return None, "out_of_videos"
@@ -62,7 +59,7 @@ class SakugaAPI:
             return []
 
         artists = []
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=SakugaAPI.HEADERS) as session:
             tasks = [session.get(f"{SakugaAPI.TAG_API}?name={urllib.parse.quote(t)}") for t in tags_to_check]
             responses = await asyncio.gather(*tasks)
             
@@ -84,7 +81,7 @@ class SakugaAPI:
             return {}
             
         tag_map = {}
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=SakugaAPI.HEADERS) as session:
             tasks = [session.get(f"{SakugaAPI.TAG_API}?name={urllib.parse.quote(t)}") for t in tags]
             responses = await asyncio.gather(*tasks)
             
