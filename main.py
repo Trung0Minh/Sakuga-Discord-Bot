@@ -1,6 +1,7 @@
 import os
 import discord
 import asyncio
+import aiohttp
 from discord.ext import commands
 from dotenv import load_dotenv
 from aiohttp import web
@@ -14,17 +15,35 @@ intents = discord.Intents.default()
 intents.message_content = True 
 intents.members = True 
 
-bot = commands.Bot(command_prefix='!', intents=intents)
+class SakugaBot(commands.Bot):
+    def __init__(self):
+        super().__init__(command_prefix='!', intents=intents)
+        self.session = None
 
-@bot.event
-async def on_ready():
-    print(f'Logged in as {bot.user.name} ({bot.user.id})')
-    try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} command(s)")
-    except Exception as e:
-        print(f"Failed to sync commands: {e}")
-    print('------')
+    async def setup_hook(self):
+        # Create a single session for the entire bot lifecycle
+        self.session = aiohttp.ClientSession(
+            headers={"User-Agent": "SakugaQuizBot/1.0 (Discord Bot)"}
+        )
+        await self.load_extension('cogs.quiz')
+        print("Bot setup complete.")
+
+    async def on_ready(self):
+        print(f'Logged in as {self.user.name} ({self.user.id})')
+        try:
+            synced = await self.tree.sync()
+            print(f"Synced {len(synced)} command(s)")
+        except Exception as e:
+            print(f"Failed to sync commands: {e}")
+        print('------')
+
+    async def close(self):
+        # Ensure the session is closed when the bot shuts down
+        if self.session:
+            await self.session.close()
+        await super().close()
+
+bot = SakugaBot()
 
 # Tiny web server to satisfy Koyeb health checks
 async def health_check(request):
@@ -37,19 +56,14 @@ async def start_web_server():
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', 8000)
     await site.start()
-    print("Web server started on port 8000 for health checks")
+    print("Web server started on port 8000")
 
 async def main():
     if not TOKEN:
         print("Error: DISCORD_TOKEN not found in .env")
         return
 
-    # Start the dummy web server in the background
     await start_web_server()
-
-    # Load cogs
-    await bot.load_extension('cogs.quiz')
-    
     await bot.start(TOKEN)
 
 if __name__ == "__main__":

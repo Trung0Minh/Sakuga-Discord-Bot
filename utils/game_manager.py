@@ -7,7 +7,8 @@ from .db_manager import DatabaseManager
 db = DatabaseManager()
 
 class GameSession:
-    def __init__(self, channel_id, creator_id, players, rounds, tags, mode="normal"):
+    def __init__(self, session, channel_id, creator_id, players, rounds, tags, mode="normal"):
+        self.session = session
         self.channel_id = channel_id
         self.creator_id = creator_id
         self.players = players # List of user IDs
@@ -60,25 +61,21 @@ class GameSession:
 
     async def start_round(self, ctx):
         print(f"[DEBUG] Starting Round {self.current_round + 1}")
-        # Determine if we should end
         if self.current_round >= self.total_rounds:
-            print("[DEBUG] Game finished (rounds completed).")
+            print("[DEBUG] Game finished.")
             await self.end_game(ctx)
             return
 
         # Fetch video
-        print(f"[DEBUG] Fetching post for round {self.current_round + 1}...")
-        post, error = await SakugaAPI.get_random_post(self.tags, exclude_ids=self.seen_post_ids)
+        post, error = await SakugaAPI.get_random_post(self.session, self.tags, exclude_ids=self.seen_post_ids)
         if error:
             print(f"[DEBUG] Fetch error: {error}")
             if error == "invalid_tags":
                 await ctx.send(f"Invalid tags `{self.tags}`")
             elif error == "out_of_videos":
                 await ctx.send("No more unique videos found with those tags! Finishing early...")
-            elif error == "no_videos":
-                await ctx.send(f"The tags `{self.tags}` return results, but none are videos (MP4/WebM).")
             else:
-                await ctx.send("An error occurred while fetching the video. Ending game.")
+                await ctx.send("An error occurred while fetching the video.")
             
             if self.current_round > 0:
                 await self.end_game(ctx)
@@ -87,28 +84,21 @@ class GameSession:
             return
 
         # Identify artist
-        print(f"[DEBUG] Identifying artists for post {post['id']}...")
-        artists = await SakugaAPI.get_artist_from_tags(post['tags'])
+        artists = await SakugaAPI.get_artist_from_tags(self.session, post['tags'])
         
         if not artists:
-            print(f"[DEBUG] No artists found for post {post['id']}. Retrying with another post.")
+            print(f"[DEBUG] No artists for {post['id']}, retrying.")
             self.seen_post_ids.append(post['id'])
             await self.start_round(ctx) 
             return
 
-        # SUCCESS: We have a valid round
         self.current_round += 1
         self.seen_post_ids.append(post['id'])
-        self.skips = set() # Reset skips for new round
+        self.skips = set()
         self.current_artists = artists
         self.is_waiting_for_answer = True
         
-        # Announce
-        video_url = post.get('file_url')
-        if not video_url:
-            video_url = post.get('sample_url')
-
-        print(f"[DEBUG] Posting video: {video_url}")
+        video_url = post.get('file_url') or post.get('sample_url')
         embed = discord.Embed(title=f"Round {self.current_round}/{self.total_rounds}", description="Guess the animator!", color=0x00ff00)
         
         view = None
@@ -117,18 +107,13 @@ class GameSession:
             view = GuessView(self)
             embed.set_footer(text="Blind Mode: Use /g <name> to guess!")
 
-        try:
-            await ctx.send(embed=embed, view=view)
-            await ctx.send(video_url)
-            print("[DEBUG] Round messages sent.")
-        except Exception as e:
-            print(f"[DEBUG] CRITICAL: Failed to send round message: {e}")
+        await ctx.send(embed=embed, view=view)
+        await ctx.send(video_url)
 
-        # Start timer
         self.timeout_task = asyncio.create_task(self.round_timeout(ctx))
 
     async def round_timeout(self, ctx):
-        await asyncio.sleep(60) # 60 seconds per round
+        await asyncio.sleep(60) 
         if self.is_waiting_for_answer:
             self.is_waiting_for_answer = False
             artist_list = ", ".join([a.title() for a in self.current_artists])
@@ -146,13 +131,12 @@ class GameSession:
         if self.mode in ["blind", "hardcore"]:
             try:
                 await message.delete()
-                await message.channel.send(f"<@{message.author.id}>, use `/g` to guess in {self.mode.capitalize()} mode!", delete_after=3)
+                await message.channel.send(f"<@{message.author.id}>, use `/g` to guess!", delete_after=3)
             except:
                 pass
             return False
 
         content = message.content.strip().lower()
-        
         if content == "skip":
             await self.handle_skip(message.author, message.channel)
             return True
@@ -166,38 +150,32 @@ class GameSession:
         if is_correct:
             await self.handle_correct_answer(message.author, message.channel)
             return True
-        else:
-            if self.mode == "strict":
-                self.scores[message.author.id] -= 0.5
-                self.deduct_global_points(message.author.id)
-            return False
+        elif self.mode == "strict":
+            self.scores[message.author.id] -= 0.5
+            self.deduct_global_points(message.author.id)
+        return False
 
     async def end_game(self, ctx):
         self.active = False
         self.is_waiting_for_answer = False
-        
         sorted_scores = sorted(self.scores.items(), key=lambda item: item[1], reverse=True)
-        
         embed = discord.Embed(title="Game Over!", color=0xffd700)
         if sorted_scores:
-            description = ""
-            for i, (uid, score) in enumerate(sorted_scores, 1):
-                description += f"{i}. <@{uid}> - {score} points\n"
+            description = "\n".join([f"{i}. <@{uid}> - {score} points" for i, (uid, score) in enumerate(sorted_scores, 1)])
             embed.description = description
         else:
             embed.description = "No one scored any points!"
-            
         await ctx.send(embed=embed)
 
 class GameManager:
-    def __init__(self):
+    def __init__(self, session):
         self.sessions = {}
+        self.session = session
 
     def create_session(self, channel_id, creator_id, players, rounds, tags, mode="normal"):
         if channel_id in self.sessions and self.sessions[channel_id].active:
             return None
-        
-        session = GameSession(channel_id, creator_id, players, rounds, tags, mode)
+        session = GameSession(self.session, channel_id, creator_id, players, rounds, tags, mode)
         self.sessions[channel_id] = session
         return session
 
