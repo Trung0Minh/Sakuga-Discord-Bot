@@ -69,12 +69,10 @@ class ShowSelectView(discord.ui.View):
             embed.add_field(name="Total Staff", value=str(s['total_staff']), inline=True)
             embed.add_field(name="Total Groups/Episodes", value=str(s['groups']), inline=True)
             
-            top_roles_str = "
-".join([f"{r}: {c}" for r, c in s['top_roles']])
+            top_roles_str = "\n".join([f"{r}: {c}" for r, c in s['top_roles']])
             embed.add_field(name="Top Roles", value=top_roles_str or "N/A", inline=False)
             
-            top_artists_str = "
-".join([f"{a}: {c}" for a, c in s['top_artists']])
+            top_artists_str = "\n".join([f"{a}: {c}" for a, c in s['top_artists']])
             embed.add_field(name="Most Credited Artists", value=top_artists_str or "N/A", inline=False)
             
             embeds.append(embed)
@@ -85,13 +83,12 @@ class ShowSelectView(discord.ui.View):
             return []
 
         current_embed = discord.Embed(title=f"Staff List: {title}", color=0x00b0f4)
-        if image_url: embed.set_thumbnail(url=image_url)
+        if image_url: current_embed.set_thumbnail(url=image_url)
         current_length = 0
         
         for group in processed['matches']:
             group_name = group['group']
-            entries = "
-".join(group['entries'])
+            entries = "\n".join(group['entries'])
             
             # Check limits (Embed total 6000, Field value 1024)
             # We cut slightly conservatively
@@ -102,7 +99,7 @@ class ShowSelectView(discord.ui.View):
             if current_length + len(entries) > 3000 or len(current_embed.fields) >= 20:
                 embeds.append(current_embed)
                 current_embed = discord.Embed(title=f"Staff List: {title} (Cont.)", color=0x00b0f4)
-                if image_url: embed.set_thumbnail(url=image_url)
+                if image_url: current_embed.set_thumbnail(url=image_url)
                 current_length = 0
             
             current_embed.add_field(name=group_name, value=entries, inline=False)
@@ -152,8 +149,7 @@ class Info(commands.Cog):
         # 1. Validate Inputs
         if not any([group, role, artist, statistics]):
             await interaction.response.send_message(
-                "❌ **Missing Filters**: You must provide at least one filter option to prevent large data dumps.
-"
+                "❌ **Missing Filters**: You must provide at least one filter option to prevent large data dumps.\n"
                 "Please use one of: `group`, `role`, `artist`, or `statistics`.",
                 ephemeral=True
             )
@@ -181,9 +177,6 @@ class Info(commands.Cog):
         }
 
         # 4. If exact match or only 1 result, auto-select?
-        # For safety/clarity, even 1 result is better confirmed via a nice embed/view if we want,
-        # but auto-selecting 1 result is better UX.
-        
         if len(results) == 1:
             slug = results[0]['slug']
             data, error = await KeyframeAPI.get_staff_data(self.bot.session, slug)
