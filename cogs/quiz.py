@@ -58,12 +58,31 @@ class Quiz(commands.Cog):
 
         embed.add_field(name="Other Commands", value=(
             "`/leaderboard`: View the all-time high scores.\n"
-            "`/cancel`: Cancel the current game (Creator only)."
+            "`/end`: End the quiz early and show rankings (Creator only).\n"
+            "`/cancel`: Cancel the current game without showing rankings (Creator only)."
         ), inline=False)
 
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name="cancel", description="Cancel the current quiz in this channel")
+    @app_commands.command(name="end", description="End the current quiz early and show final rankings")
+    async def end(self, interaction: discord.Interaction):
+        session = self.game_manager.get_session(interaction.channel_id)
+        
+        if not session or not session.active:
+            await interaction.response.send_message("There is no active quiz in this channel!", ephemeral=True)
+            return
+
+        if interaction.user.id != session.creator_id:
+            await interaction.response.send_message("Only the person who started the quiz can end it!", ephemeral=True)
+            return
+
+        if hasattr(session, 'timeout_task'):
+            session.timeout_task.cancel()
+            
+        await session.end_game(interaction.channel)
+        self.game_manager.remove_session(interaction.channel_id)
+
+    @app_commands.command(name="cancel", description="Cancel the current quiz without showing rankings")
     async def cancel(self, interaction: discord.Interaction):
         session = self.game_manager.get_session(interaction.channel_id)
         
