@@ -143,10 +143,7 @@ class KeyframeAPI:
                 
                 avg_data = []
                 for role, counts in role_counts_per_ep.items():
-                    # Calculate average over total episodes (including those where role might be 0 if not listed? 
-                    # The current logic only appends if found in the loop. 
-                    # If a role is missing from an episode's credits, it's effectively 0.
-                    # So Sum / Total Episodes is correct.
+                    # Calculate average over total episodes
                     avg = sum(counts) / total_episodes if total_episodes > 0 else 0
                     avg_data.append((role, avg))
                 
@@ -166,8 +163,6 @@ class KeyframeAPI:
             af = artist_filter.lower()
             
             for menu in data.get("menus", []):
-                group_name = menu.get("name", "").replace("#", "") # Remove # for cleaner list if desired, or keep it.
-                # Keeping the style from request: #01, OP, ED...
                 group_name = menu.get("name", "")
                 
                 for credit in menu.get("credits", []):
@@ -202,8 +197,8 @@ class KeyframeAPI:
                 entries = []
                 # Sort roles alphabetically
                 for role, groups in sorted(roles.items()):
-                    group_str = ":".join(groups) # User asked for #01#02#03... style for compactness
-                    entries.append(f"**{role}**: {group_str}")
+                    group_str = ", ".join(groups) # Comma separator for groups
+                    entries.append(f"**{role}**:\n{group_str}") # Role then newline
                 
                 results["matches"].append({
                     "group": artist_name, 
@@ -251,8 +246,8 @@ class KeyframeAPI:
             for role_name, artists in role_data.items():
                 entries = []
                 for artist_name, groups in sorted(artists.items()):
-                    group_str = ":".join(groups)
-                    entries.append(f"**{artist_name}**: {group_str}")
+                    group_str = ", ".join(groups) # Comma separator for groups
+                    entries.append(f"**{artist_name}**:\n{group_str}") # Artist then newline
 
                 results["matches"].append({
                     "group": role_name, # Header will be the Role Name
@@ -286,17 +281,21 @@ class KeyframeAPI:
                         p_en = person.get("en", "")
                         p_ja = person.get("ja", "")
                         
+                        # Display format: EN (JA)
                         d_name = p_en
                         if p_ja and p_en != p_ja:
-                            d_name = f"{p_en} ({p_ja})"
+                            if not d_name:
+                                d_name = p_ja
+                            else:
+                                d_name = f"{p_en} ({p_ja})"
                         elif not d_name:
                             d_name = p_ja or "Unknown"
 
                         matching_staff.append(d_name)
                     
                     if matching_staff:
-                        # Group view standard display
-                        group_match["entries"].append(f"**{role_name}**: {', '.join(matching_staff)}")
+                        # Format: Role:\nNames
+                        group_match["entries"].append(f"**{role_name}**:\n{', '.join(matching_staff)}")
 
             if group_match["entries"]:
                 results["matches"].append(group_match)

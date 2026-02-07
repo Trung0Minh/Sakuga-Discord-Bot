@@ -147,7 +147,7 @@ class ShowSelectView(discord.ui.View):
         
         for group in processed['matches']:
             group_name = group['group']
-            entries = "\n".join(group['entries'])
+            entries = "\n\n".join(group['entries']) # Double newline for separation
             
             # Check limits (Embed total 6000, Field value 1024)
             if len(entries) > 1000:
