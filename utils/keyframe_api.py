@@ -70,33 +70,10 @@ class KeyframeAPI:
             return None, "json_decode_error"
 
     @staticmethod
-    def process_data(data, group_filter=None, role_filter=None, artist_filter=None, show_stats=False):
+    def process_data(data, group_filter=None, role_filter=None, artist_filter=None, statistics_mode=None):
         """
         Filters and processes the raw staff data based on user criteria.
         Returns a structured result object or text.
-        
-        Structure of 'data':
-        {
-            "title": "Show Title",
-            "menus": [
-                {
-                    "name": "#01" (Group Name),
-                    "credits": [
-                        {
-                            "name": "Key Animation" (Category),
-                            "roles": [
-                                {
-                                    "name": "Key Animation" (Role Name),
-                                    "staff": [
-                                        {"en": "Name", "ja": "Name", ...}
-                                    ]
-                                }
-                            ]
-                        }
-                    ]
-                }
-            ]
-        }
         """
         
         results = {
@@ -107,36 +84,79 @@ class KeyframeAPI:
         }
 
         # 1. Statistics Mode
-        if show_stats:
-            stats = {
-                "total_staff": 0,
-                "groups": len(data.get("menus", [])),
-                "top_roles": defaultdict(int),
-                "top_artists": defaultdict(int)
-            }
+        if statistics_mode:
+            results["stats_mode"] = statistics_mode
             
-            seen_artists = set()
-            
-            for menu in data.get("menus", []):
-                for credit in menu.get("credits", []):
-                    for role_obj in credit.get("roles", []):
-                        role_name = role_obj.get("name", "Unknown")
-                        for person in role_obj.get("staff", []):
-                            name = person.get("en") or person.get("ja") or "Unknown"
-                            
-                            stats["top_roles"][role_name] += 1
-                            stats["top_artists"][name] += 1
-                            
-                            # Count unique people if possible (using ID if available, else name)
-                            pid = person.get("id") or name
-                            if pid not in seen_artists:
-                                stats["total_staff"] += 1
-                                seen_artists.add(pid)
-            
-            # Sort tops
-            stats["top_roles"] = sorted(stats["top_roles"].items(), key=lambda x: x[1], reverse=True)[:5]
-            stats["top_artists"] = sorted(stats["top_artists"].items(), key=lambda x: x[1], reverse=True)[:5]
-            results["stats"] = stats
+            # Common loop for stats
+            if statistics_mode == "appearance":
+                # "Staff Appearance": List of staff sorted by number of episodes they are credited in
+                artist_episodes = defaultdict(set)
+                
+                for menu in data.get("menus", []):
+                    group = menu.get("name", "")
+                    for credit in menu.get("credits", []):
+                        for role_obj in credit.get("roles", []):
+                            for person in role_obj.get("staff", []):
+                                p_en = person.get("en", "")
+                                p_ja = person.get("ja", "")
+                                
+                                full_name = "Unknown"
+                                if p_ja and p_en:
+                                    full_name = f"{p_ja} / {p_en}"
+                                elif p_ja:
+                                    full_name = p_ja
+                                elif p_en:
+                                    full_name = p_en
+                                
+                                artist_episodes[full_name].add(group)
+                
+                # Sort by count
+                sorted_artists = sorted(artist_episodes.items(), key=lambda x: len(x[1]), reverse=True)[:20] # Top 20
+                results["stats"] = {
+                    "type": "appearance",
+                    "data": sorted_artists # List of (Name, Set(Groups))
+                }
+
+            elif statistics_mode == "role_average":
+                # "Role Average": Average staff count per episode for each role
+                # Map Role -> List of counts (one count per episode)
+                role_counts_per_ep = defaultdict(list)
+                
+                total_groups = len(data.get("menus", []))
+                
+                for menu in data.get("menus", []):
+                    # We need to track counts for *this* episode specifically
+                    current_ep_role_counts = defaultdict(int)
+                    
+                    for credit in menu.get("credits", []):
+                        for role_obj in credit.get("roles", []):
+                            role_name = role_obj.get("name", "Unknown")
+                            count = len(role_obj.get("staff", []))
+                            current_ep_role_counts[role_name] += count
+                    
+                    # Add these counts to the global list
+                    for r, c in current_ep_role_counts.items():
+                        role_counts_per_ep[r].append(c)
+                
+                # Calculate averages
+                # Average = Sum of counts / Total Groups (assuming we want avg per episode including 0s? 
+                # Usually average is over episodes where the role appears, or over total episodes.
+                # Let's do over total episodes for consistency, or len(role_counts_per_ep[r]) if it's only appended when present.
+                # Since we loop all menus, if a role isn't in a menu, it won't be in the list.
+                # To be accurate "Average per episode", we should divide by `total_groups`.
+                
+                avg_data = []
+                for role, counts in role_counts_per_ep.items():
+                    avg = sum(counts) / total_groups if total_groups > 0 else 0
+                    avg_data.append((role, avg))
+                
+                # Sort by average
+                avg_data.sort(key=lambda x: x[1], reverse=True)
+                results["stats"] = {
+                    "type": "role_average",
+                    "data": avg_data[:20]
+                }
+
             return results
 
         # 2. Artist Filter Mode (Aggregated View)
@@ -146,8 +166,6 @@ class KeyframeAPI:
             af = artist_filter.lower()
             
             for menu in data.get("menus", []):
-                group_name = menu.get("name", "").replace("#", "") # Remove # for cleaner list if desired, or keep it.
-                # Keeping the style from request: #01, OP, ED...
                 group_name = menu.get("name", "")
                 
                 for credit in menu.get("credits", []):
@@ -166,8 +184,7 @@ class KeyframeAPI:
                             if (not p_en or af not in p_en.lower()) and (not p_ja or af not in p_ja.lower()):
                                 continue
                             
-                            # Construct Display Name: "JA / EN" or "EN" or "JA"
-                            # The user requested "須藤友徳 / Tomonori Sudou" format
+                            # Construct Display Name
                             full_name = "Unknown"
                             if p_ja and p_en:
                                 full_name = f"{p_ja} / {p_en}"
@@ -183,13 +200,11 @@ class KeyframeAPI:
                 entries = []
                 # Sort roles alphabetically
                 for role, groups in sorted(roles.items()):
-                    # Join groups: #01#02 or #01, #02. User example had compacted list, but comma is safer for reading.
-                    # User example: OPED#01#02... - Let's use space or comma for clarity.
-                    group_str = " ".join(groups) 
+                    group_str = "".join(groups) # User asked for #01#02#03... style for compactness
                     entries.append(f"**{role}**: {group_str}")
                 
                 results["matches"].append({
-                    "group": artist_name, # Use the group field for the Artist Name header
+                    "group": artist_name, 
                     "entries": entries
                 })
                 
@@ -198,11 +213,60 @@ class KeyframeAPI:
                 
             return results
 
-        # 3. Standard Filtering Mode (Group/Role)
+        # 3. Role Filter Mode (Aggregated View - Pivot: Role -> Artist -> Groups)
+        if role_filter:
+            # Structure: { "Role Name": { "Artist Name": ["Group1", "Group2"] } }
+            role_data = defaultdict(lambda: defaultdict(list))
+            rf = role_filter.lower()
+
+            for menu in data.get("menus", []):
+                group_name = menu.get("name", "")
+
+                for credit in menu.get("credits", []):
+                    for role_obj in credit.get("roles", []):
+                        role_name = role_obj.get("name", "")
+
+                        # Filter by Role
+                        if rf not in role_name.lower():
+                            continue
+
+                        for person in role_obj.get("staff", []):
+                            p_en = person.get("en", "")
+                            p_ja = person.get("ja", "")
+                            
+                            # Construct Display Name
+                            full_name = "Unknown"
+                            if p_ja and p_en:
+                                full_name = f"{p_ja} / {p_en}"
+                            elif p_ja:
+                                full_name = p_ja
+                            elif p_en:
+                                full_name = p_en
+                            
+                            role_data[role_name][full_name].append(group_name)
+
+            # Format output
+            for role_name, artists in role_data.items():
+                entries = []
+                for artist_name, groups in sorted(artists.items()):
+                    group_str = "".join(groups)
+                    entries.append(f"**{artist_name}**: {group_str}")
+
+                results["matches"].append({
+                    "group": role_name, # Header will be the Role Name
+                    "entries": entries
+                })
+
+            if not results["matches"]:
+                results["filtered_empty"] = True
+            
+            return results
+
+        # 4. Standard Group Filter (Default)
         for menu in data.get("menus", []):
             group_name = menu.get("name", "")
             
-            # Filter by Group (Partial match, case-insensitive)
+            # Filter by Group
             if group_filter and group_filter.lower() not in group_name.lower():
                 continue
 
@@ -212,40 +276,24 @@ class KeyframeAPI:
             }
 
             for credit in menu.get("credits", []):
-                # We usually skip the "category" (credit['name']) and go straight to roles
-                # unless we want to filter by category? The prompt asked for "role".
-                
                 for role_obj in credit.get("roles", []):
                     role_name = role_obj.get("name", "")
-                    
-                    # Filter by Role
-                    if role_filter and role_filter.lower() not in role_name.lower():
-                        continue
                     
                     matching_staff = []
                     for person in role_obj.get("staff", []):
                         p_en = person.get("en", "")
                         p_ja = person.get("ja", "")
                         
-                        # Filter by Artist
-                        if artist_filter:
-                            af = artist_filter.lower()
-                            if (not p_en or af not in p_en.lower()) and (not p_ja or af not in p_ja.lower()):
-                                continue
-                        
-                        # Display name preference: EN (JA) or just EN or just JA
                         d_name = p_en
                         if p_ja and p_en != p_ja:
-                            if not d_name:
-                                d_name = p_ja
-                            else:
-                                d_name = f"{p_en} ({p_ja})"
+                            d_name = f"{p_en} ({p_ja})"
                         elif not d_name:
                             d_name = p_ja or "Unknown"
 
                         matching_staff.append(d_name)
                     
                     if matching_staff:
+                        # Group view standard display
                         group_match["entries"].append(f"**{role_name}**: {', '.join(matching_staff)}")
 
             if group_match["entries"]:

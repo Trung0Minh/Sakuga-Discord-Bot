@@ -63,17 +63,30 @@ class ShowSelectView(discord.ui.View):
         # 1. Stats Embed
         if processed.get('stats'):
             s = processed['stats']
-            embed = discord.Embed(title=f"Staff Statistics: {title}", color=0x00ff00)
+            stat_type = s.get('type')
+            
+            embed_title = f"Staff Statistics ({'Appearance' if stat_type == 'appearance' else 'Role Average'}): {title}"
+            embed = discord.Embed(title=embed_title, color=0x00ff00)
             if image_url: embed.set_thumbnail(url=image_url)
             
-            embed.add_field(name="Total Staff", value=str(s['total_staff']), inline=True)
-            embed.add_field(name="Total Groups/Episodes", value=str(s['groups']), inline=True)
+            # Format data based on type
+            data_list = s.get('data', [])
             
-            top_roles_str = "\n".join([f"{r}: {c}" for r, c in s['top_roles']])
-            embed.add_field(name="Top Roles", value=top_roles_str or "N/A", inline=False)
-            
-            top_artists_str = "\n".join([f"{a}: {c}" for a, c in s['top_artists']])
-            embed.add_field(name="Most Credited Artists", value=top_artists_str or "N/A", inline=False)
+            if not data_list:
+                embed.description = "No data available."
+            else:
+                desc = ""
+                for i, (name, value) in enumerate(data_list):
+                    if stat_type == 'appearance':
+                        # value is a Set of groups
+                        count = len(value)
+                        desc += f"**{i+1}. {name}**: {count} eps\n"
+                    elif stat_type == 'role_average':
+                        # value is average count
+                        desc += f"**{i+1}. {name}**: {value:.2f} per ep\n"
+                
+                # Truncate if too long (20 items max usually fine for description < 4096 chars)
+                embed.description = desc
             
             embeds.append(embed)
             return embeds
@@ -145,7 +158,11 @@ class Info(commands.Cog):
         artist="Filter by Artist Name",
         statistics="Show summary statistics instead of a list"
     )
-    async def staff(self, interaction: discord.Interaction, query: str, group: str = None, role: str = None, artist: str = None, statistics: bool = False):
+    @app_commands.choices(statistics=[
+        app_commands.Choice(name="Staff Appearance", value="appearance"),
+        app_commands.Choice(name="Role Average", value="role_average")
+    ])
+    async def staff(self, interaction: discord.Interaction, query: str, group: str = None, role: str = None, artist: str = None, statistics: app_commands.Choice[str] = None):
         # 1. Validate Inputs
         if not any([group, role, artist, statistics]):
             await interaction.response.send_message(
@@ -167,13 +184,16 @@ class Info(commands.Cog):
         if not results:
             await interaction.followup.send(f"No shows found for `{query}`.")
             return
+            
+        # Get statistics value if present
+        stats_value = statistics.value if statistics else None
 
         # 3. Store filters for the callback
         filters = {
             'group': group,
             'role': role,
             'artist': artist,
-            'statistics': statistics
+            'statistics': stats_value
         }
 
         # 4. If exact match or only 1 result, auto-select?
