@@ -50,13 +50,15 @@ async def health_check(request):
     return web.Response(text="Bot is running")
 
 async def start_web_server():
+    # Use the port assigned by Koyeb, default to 8000 for local testing
+    port = int(os.getenv("PORT", 8000))
     app = web.Application()
     app.router.add_get('/', health_check)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8000)
+    site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    print("Web server started on port 8000")
+    print(f"Web server started on port {port}")
 
 async def main():
     if not TOKEN:
