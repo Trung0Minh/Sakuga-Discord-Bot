@@ -2,6 +2,7 @@ import aiohttp
 import json
 import re
 import html
+import urllib.parse
 from collections import defaultdict
 
 class KeyframeAPI:
@@ -11,9 +12,12 @@ class KeyframeAPI:
     @staticmethod
     async def fetch_json(session, url):
         try:
-            async with session.get(url, timeout=10) as response:
+            # Add Accept header and use content_type=None to be more flexible with mimetypes
+            headers = {"Accept": "application/json"}
+            async with session.get(url, headers=headers, timeout=10) as response:
                 if response.status == 200:
-                    return await response.json(), None
+                    # Use content_type=None because some APIs return JSON with text/html mimetype
+                    return await response.json(content_type=None), None
                 return None, f"HTTP {response.status}"
         except Exception as e:
             return None, str(e)
@@ -34,7 +38,8 @@ class KeyframeAPI:
         Searches for a show by title.
         Returns a list of dicts: {'slug': str, 'name': str, 'year': int, 'kv': str}
         """
-        data, error = await cls.fetch_json(session, cls.SEARCH_URL.format(query))
+        encoded_query = urllib.parse.quote(query)
+        data, error = await cls.fetch_json(session, cls.SEARCH_URL.format(encoded_query))
         if error:
             return [], error
         
