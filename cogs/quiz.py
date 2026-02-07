@@ -102,22 +102,35 @@ class Quiz(commands.Cog):
 
         content = name.strip().lower()
         
-        # Check correctness
-        is_correct = False
-        for artist in session.current_artists:
-            if content == artist.lower():
-                is_correct = True
-                break
+        # Handle multiple guesses (comma separated)
+        guesses = {g.strip() for g in content.split(",") if g.strip()}
         
-        if is_correct:
+        correct_count = 0
+        wrong_count = 0
+        
+        current_artists_lower = [a.lower() for a in session.current_artists]
+        
+        for g_item in guesses:
+            if g_item in current_artists_lower:
+                correct_count += 1
+            else:
+                wrong_count += 1
+        
+        if correct_count > 0:
             await interaction.response.send_message(f"Checking guess: `{name}`...", ephemeral=True)
-            await session.handle_correct_answer(interaction.user, interaction.channel)
+            
+            points = correct_count
+            if session.mode in ["strict", "hardcore"]:
+                points -= (wrong_count * 0.5)
+            
+            await session.handle_correct_answer(interaction.user, interaction.channel, points=points)
         else:
             msg = f"Incorrect! (`{name}`)"
             if session.mode in ["strict", "hardcore"]:
-                session.scores[interaction.user.id] -= 0.5
-                session.deduct_global_points(interaction.user.id)
-                msg += " (-0.5 points)"
+                penalty = wrong_count * 0.5
+                session.scores[interaction.user.id] -= penalty
+                session.deduct_global_points(interaction.user.id, penalty)
+                msg += f" (-{penalty} points)"
             
             await interaction.response.send_message(msg, ephemeral=True)
 

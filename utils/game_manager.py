@@ -23,20 +23,20 @@ class GameSession:
         self.skips = set()
         self.seen_post_ids = []
 
-    def deduct_global_points(self, user_id):
-        db.add_point(user_id, -0.5)
+    def deduct_global_points(self, user_id, amount=0.5):
+        db.add_point(user_id, -amount)
 
-    async def handle_correct_answer(self, user, channel):
+    async def handle_correct_answer(self, user, channel, points=1):
         if not self.is_waiting_for_answer:
             return
         
         self.is_waiting_for_answer = False
         self.timeout_task.cancel()
         
-        self.scores[user.id] += 1
-        db.add_point(user.id) # Global leaderboard update
+        self.scores[user.id] += points
+        db.add_point(user.id, points) # Global leaderboard update
         artist_list = ", ".join([a.title() for a in self.current_artists])
-        await channel.send(f"Correct! <@{user.id}> got it! The animator(s) was **{artist_list}**.")
+        await channel.send(f"Correct! <@{user.id}> got it! The animator(s) was **{artist_list}**. (+{points} points)")
         
         await asyncio.sleep(2)
         await self.start_round(channel)
@@ -156,19 +156,33 @@ class GameSession:
             await self.handle_skip(message.author, message.channel)
             return True
 
-        is_correct = False
-        for artist in self.current_artists:
-            if content == artist.lower():
-                is_correct = True
-                break
+        # Handle multiple guesses (comma separated)
+        guesses = {g.strip() for g in content.split(",") if g.strip()}
         
-        if is_correct:
-            await self.handle_correct_answer(message.author, message.channel)
+        correct_count = 0
+        wrong_count = 0
+        
+        current_artists_lower = [a.lower() for a in self.current_artists]
+        
+        for guess in guesses:
+            if guess in current_artists_lower:
+                correct_count += 1
+            else:
+                wrong_count += 1
+        
+        if correct_count > 0:
+            points = correct_count
+            if self.mode == "strict":
+                points -= (wrong_count * 0.5)
+            
+            await self.handle_correct_answer(message.author, message.channel, points=points)
             return True
         else:
             if self.mode == "strict":
-                self.scores[message.author.id] -= 0.5
-                self.deduct_global_points(message.author.id)
+                penalty = wrong_count * 0.5
+                if penalty > 0:
+                    self.scores[message.author.id] -= penalty
+                    self.deduct_global_points(message.author.id, penalty)
             return False
 
     async def end_game(self, ctx):
