@@ -51,7 +51,7 @@ class Quiz(commands.Cog):
 
         embed.add_field(name="Game Modes", value=(
             "**Normal**: Standard guessing in chat.\n"
-            "**Strict**: Deducts 0.5 points for every wrong guess.\n"
+            "**Strict**: Deducts 0.5 points for wrong guesses. **MUST use `.` prefix (e.g. `.yutapon`)**.\n"
             "**Blind**: Guesses are hidden from other players (must use `/g`).\n"
             "**Hardcore**: Combines Strict and Blind modes."
         ), inline=False)

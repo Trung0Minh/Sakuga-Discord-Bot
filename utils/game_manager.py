@@ -106,6 +106,8 @@ class GameSession:
             from .views import GuessView # Local import
             view = GuessView(self)
             embed.set_footer(text="Blind Mode: Use /g <name> to guess!")
+        elif self.mode == "strict":
+            embed.set_footer(text="Strict Mode: Use '.' prefix to guess (e.g. .yutapon)")
 
         try:
             await ctx.send(embed=embed, view=view)
@@ -143,6 +145,12 @@ class GameSession:
             return False
 
         content = message.content.strip().lower()
+        
+        # In strict mode, only treat as guess if it starts with '.'
+        if self.mode == "strict":
+            if not content.startswith("."):
+                return False
+            content = content[1:].strip() # Remove the '.' and any following whitespace
         
         if content == "skip":
             await self.handle_skip(message.author, message.channel)
