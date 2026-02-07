@@ -78,16 +78,23 @@ class RoleSelect(discord.ui.Select):
         await self.view.refresh_display(interaction)
 
 class ShowSelectView(discord.ui.View):
-    def __init__(self, search_results, filters, bot):
+    def __init__(self, search_results, filters, bot, user_id):
         super().__init__(timeout=180)
         self.bot = bot
         self.filters = filters
+        self.user_id = user_id # Store user ID to restrict interaction
         self.search_results = search_results
         self.embeds = []
         self.current_page = 0
         self.current_data = None
         self.message_sent = False
         self._setup_initial_items()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This is not your search! Run `/staff` to start your own.", ephemeral=True)
+            return False
+        return True
 
     def _setup_initial_items(self):
         self.clear_items()
@@ -116,6 +123,7 @@ class ShowSelectView(discord.ui.View):
 
     async def update_show(self, interaction, slug):
         try:
+            print(f"[DEBUG] update_show called for slug: {slug}")
             data, error = await KeyframeAPI.get_staff_data(self.bot.session, slug)
             if error:
                 await interaction.followup.send(f"Error fetching data: {error}", ephemeral=True)
@@ -346,7 +354,6 @@ class Info(commands.Cog):
         app_commands.Choice(name="Role Average", value="role_average")
     ])
     async def staff(self, interaction: discord.Interaction, query: str, role: str = None, artist: str = None, statistics: app_commands.Choice[str] = None):
-        # Enforce Exclusivity
         active_filters = [f for f in [role, artist, statistics] if f is not None]
         if len(active_filters) > 1:
             await interaction.response.send_message(
@@ -373,7 +380,7 @@ class Info(commands.Cog):
             'status': "All"
         }
 
-        view = ShowSelectView(results, filters, self.bot)
+        view = ShowSelectView(results, filters, self.bot, interaction.user.id)
         if len(results) == 1:
             await view.update_show(interaction, results[0]['slug'])
         else:
