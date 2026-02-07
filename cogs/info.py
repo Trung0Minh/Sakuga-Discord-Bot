@@ -24,20 +24,19 @@ class ShowSelect(discord.ui.Select):
         await self.view.update_show(interaction, slug)
 
 class EpisodeSelect(discord.ui.Select):
-    def __init__(self, menus):
+    def __init__(self, menus, current_val=None):
         options = []
-        # Get first 25 menus (Overview, OP, ED, #01, etc.)
         for menu in menus[:25]:
             name = menu.get('name', 'Unknown')
-            options.append(discord.SelectOption(label=name, value=name))
+            # Mark as default if it matches current filter
+            is_default = (name == current_val)
+            options.append(discord.SelectOption(label=name, value=name, default=is_default))
         
         super().__init__(placeholder="Select an episode/group...", min_values=1, max_values=1, options=options, row=1)
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
         self.view.filters['episode'] = self.values[0]
-        # Clear other specific filters if selecting an episode? 
-        # User said "allow more than one option", so we keep artist/role if they exist.
         await self.view.refresh_display(interaction)
 
 class ShowSelectView(discord.ui.View):
@@ -48,9 +47,8 @@ class ShowSelectView(discord.ui.View):
         self.filters = filters
         self.embeds = []
         self.current_page = 0
-        self.current_data = None # Full JSON data of the selected show
+        self.current_data = None
         
-        # Add Show Select
         if search_results:
             self.add_item(ShowSelect(search_results, interaction, filters))
 
@@ -61,14 +59,17 @@ class ShowSelectView(discord.ui.View):
             return
         
         self.current_data = data
-        
-        # Update/Add Episode Select
-        # Remove old EpisodeSelect if exists
-        self.children = [c for child in self.children if not isinstance(child, EpisodeSelect)]
-        
         menus = data.get('menus', [])
+        
+        # Default Logic: If no filters set, default to first menu (Overview)
+        if not any([self.filters.get('role'), self.filters.get('artist'), self.filters.get('statistics')]):
+            if not self.filters.get('episode') and menus:
+                self.filters['episode'] = menus[0]['name']
+
+        # Update Episode Select
+        self.children = [c for child in self.children if not isinstance(child, EpisodeSelect)]
         if menus:
-            self.add_item(EpisodeSelect(menus))
+            self.add_item(EpisodeSelect(menus, self.filters.get('episode')))
             
         await self.refresh_display(interaction)
 
@@ -221,7 +222,6 @@ class Info(commands.Cog):
     @app_commands.command(name="staff", description="Search specific staff credits from keyframe-staff-list.com")
     @app_commands.describe(
         query="The name of the anime to search for",
-        episode="Filter by Episode/Group (e.g., '#01', 'OP', 'ED')",
         role="Filter by Role (e.g., 'Key Animation', 'Director')",
         artist="Filter by Artist Name",
         statistics="Show summary statistics instead of a list"
@@ -230,16 +230,9 @@ class Info(commands.Cog):
         app_commands.Choice(name="Staff Appearance", value="appearance"),
         app_commands.Choice(name="Role Average", value="role_average")
     ])
-    async def staff(self, interaction: discord.Interaction, query: str, episode: str = None, role: str = None, artist: str = None, statistics: app_commands.Choice[str] = None):
-        if not any([episode, role, artist, statistics]):
-            await interaction.response.send_message(
-                "❌ **Missing Filters**: You must provide at least one filter option.\n"
-                "Please use one of: `episode`, `role`, `artist`, or `statistics`.",
-                ephemeral=True
-            )
-            return
-
+    async def staff(self, interaction: discord.Interaction, query: str, role: str = None, artist: str = None, statistics: app_commands.Choice[str] = None):
         await interaction.response.defer()
+
         results, error = await KeyframeAPI.search(self.bot.session, query)
         
         if error:
@@ -251,7 +244,7 @@ class Info(commands.Cog):
             
         stats_value = statistics.value if statistics else None
         filters = {
-            'episode': episode,
+            'episode': None, # Default None, View logic handles "Overview" default
             'role': role,
             'artist': artist,
             'statistics': stats_value
