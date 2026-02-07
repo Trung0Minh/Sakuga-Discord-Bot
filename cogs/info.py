@@ -73,11 +73,6 @@ class ShowSelectView(discord.ui.View):
         # Enable/Disable buttons based on pages
         has_pages = len(self.embeds) > 1
         
-        # We need to find the buttons in children. 
-        # They are usually at indices 1 and 2 if Select is 0.
-        # But to be safe, we can reference them by custom_id or type if we set them.
-        # Easier: Just iterate and check type or label.
-        
         for child in self.children:
             if isinstance(child, discord.ui.Button):
                 if not has_pages:
@@ -110,57 +105,88 @@ class ShowSelectView(discord.ui.View):
             stat_type = s.get('type')
             
             embed_title = f"Staff Statistics ({'Appearance' if stat_type == 'appearance' else 'Role Average'}): {title}"
-            embed = discord.Embed(title=embed_title, color=0x00ff00)
-            if image_url: embed.set_thumbnail(url=image_url)
             
             # Format data based on type
             data_list = s.get('data', [])
             
             if not data_list:
-                embed.description = "No data available."
+                embed = discord.Embed(title=embed_title, color=0x00ff00, description="No data available.")
+                if image_url: embed.set_thumbnail(url=image_url)
+                embeds.append(embed)
             else:
-                desc = ""
+                lines = []
                 for i, (name, value) in enumerate(data_list):
                     if stat_type == 'appearance':
-                        # value is a Set of groups
                         count = len(value)
-                        desc += f"**{i+1}. {name}**: {count} eps\n"
+                        lines.append(f"**{i+1}. {name}**: {count} eps")
                     elif stat_type == 'role_average':
-                        # value is average count
-                        desc += f"**{i+1}. {name}**: {value:.2f} per ep\n"
+                        lines.append(f"**{i+1}. {name}**: {value:.2f} per ep")
                 
-                # Truncate if too long
-                if len(desc) > 4000:
-                    desc = desc[:4000] + "... (truncated)"
-                embed.description = desc
+                current_desc = ""
+                for line in lines:
+                    if len(current_desc) + len(line) + 1 > 4000:
+                        embed = discord.Embed(title=embed_title, color=0x00ff00, description=current_desc)
+                        if image_url: embed.set_thumbnail(url=image_url)
+                        embeds.append(embed)
+                        current_desc = line + "\n"
+                    else:
+                        current_desc += line + "\n"
+                
+                if current_desc:
+                    embed = discord.Embed(title=embed_title, color=0x00ff00, description=current_desc)
+                    if image_url: embed.set_thumbnail(url=image_url)
+                    embeds.append(embed)
             
-            embeds.append(embed)
             return embeds
 
         # 2. List Embeds (Paginated)
         if processed['filtered_empty']:
             return []
 
-        current_embed = discord.Embed(title=f"Staff List: {title}", color=0x00b0f4)
-        if image_url: current_embed.set_thumbnail(url=image_url)
-        current_length = 0
+        def get_new_embed(is_cont=False):
+            t = f"Staff List: {title}" + (" (Cont.)" if is_cont else "")
+            emb = discord.Embed(title=t, color=0x00b0f4)
+            if image_url: emb.set_thumbnail(url=image_url)
+            return emb
+
+        current_embed = get_new_embed()
+        current_total_length = 0
         
         for group in processed['matches']:
             group_name = group['group']
-            entries = "\n\n".join(group['entries']) # Double newline for separation
             
-            # Check limits (Embed total 6000, Field value 1024)
-            if len(entries) > 1000:
-                entries = entries[:1000] + "... (truncated)"
-            
-            if current_length + len(entries) > 3000 or len(current_embed.fields) >= 20:
+            if len(current_embed.fields) >= 20 or current_total_length > 5000:
                 embeds.append(current_embed)
-                current_embed = discord.Embed(title=f"Staff List: {title} (Cont.)", color=0x00b0f4)
-                if image_url: current_embed.set_thumbnail(url=image_url)
-                current_length = 0
-            
-            current_embed.add_field(name=group_name, value=entries, inline=False)
-            current_length += len(entries)
+                current_embed = get_new_embed(True)
+                current_total_length = 0
+
+            field_content = ""
+            for entry in group['entries']:
+                if len(field_content) + len(entry) + 2 > 1024:
+                    if field_content:
+                        current_embed.add_field(name=group_name if not current_embed.fields or current_embed.fields[-1].name != group_name else f"{group_name} (Cont.)", value=field_content, inline=False)
+                        current_total_length += len(field_content)
+                        field_content = ""
+                    
+                    if len(entry) > 1024:
+                        parts = entry.split(", ")
+                        temp_part = ""
+                        for p in parts:
+                            if len(temp_part) + len(p) + 2 > 1024:
+                                current_embed.add_field(name=group_name + " (Cont.)", value=temp_part, inline=False)
+                                current_total_length += len(temp_part)
+                                temp_part = p
+                            else:
+                                temp_part += (", " if temp_part else "") + p
+                        field_content = temp_part
+                    else:
+                        field_content = entry
+                else:
+                    field_content += ("\n\n" if field_content else "") + entry
+
+            if field_content:
+                current_embed.add_field(name=group_name if not current_embed.fields or current_embed.fields[-1].name != group_name else f"{group_name} (Cont.)", value=field_content, inline=False)
+                current_total_length += len(field_content)
         
         if current_embed.fields:
             embeds.append(current_embed)
@@ -212,11 +238,9 @@ class Info(commands.Cog):
             'statistics': stats_value
         }
 
-        # Use the combined view for both single and multiple results to ensure consistent behavior
         view = ShowSelectView(results, interaction, filters, self.bot)
         
         if len(results) == 1:
-            # Auto-select logic using the view's internal methods
             slug = results[0]['slug']
             data, error = await KeyframeAPI.get_staff_data(self.bot.session, slug)
             if error:
@@ -239,8 +263,6 @@ class Info(commands.Cog):
 
             view.embeds = embeds
             view.update_buttons()
-            
-            # Send with the view so the dropdown (and buttons) are present
             await interaction.followup.send(embed=embeds[0], view=view)
         
         else:
