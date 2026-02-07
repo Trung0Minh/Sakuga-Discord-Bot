@@ -139,7 +139,66 @@ class KeyframeAPI:
             results["stats"] = stats
             return results
 
-        # 2. Filtering Mode
+        # 2. Artist Filter Mode (Aggregated View)
+        if artist_filter:
+            # Structure: { "Artist Name": { "Role": ["Group1", "Group2"] } }
+            artist_data = defaultdict(lambda: defaultdict(list))
+            af = artist_filter.lower()
+            
+            for menu in data.get("menus", []):
+                group_name = menu.get("name", "").replace("#", "") # Remove # for cleaner list if desired, or keep it.
+                # Keeping the style from request: #01, OP, ED...
+                group_name = menu.get("name", "")
+                
+                for credit in menu.get("credits", []):
+                    for role_obj in credit.get("roles", []):
+                        role_name = role_obj.get("name", "")
+                        
+                        # Apply role filter if present
+                        if role_filter and role_filter.lower() not in role_name.lower():
+                            continue
+
+                        for person in role_obj.get("staff", []):
+                            p_en = person.get("en", "")
+                            p_ja = person.get("ja", "")
+                            
+                            # Check if this person matches the artist filter
+                            if (not p_en or af not in p_en.lower()) and (not p_ja or af not in p_ja.lower()):
+                                continue
+                            
+                            # Construct Display Name: "JA / EN" or "EN" or "JA"
+                            # The user requested "須藤友徳 / Tomonori Sudou" format
+                            full_name = "Unknown"
+                            if p_ja and p_en:
+                                full_name = f"{p_ja} / {p_en}"
+                            elif p_ja:
+                                full_name = p_ja
+                            elif p_en:
+                                full_name = p_en
+                                
+                            artist_data[full_name][role_name].append(group_name)
+
+            # Format the output for the embed
+            for artist_name, roles in artist_data.items():
+                entries = []
+                # Sort roles alphabetically
+                for role, groups in sorted(roles.items()):
+                    # Join groups: #01#02 or #01, #02. User example had compacted list, but comma is safer for reading.
+                    # User example: OPED#01#02... - Let's use space or comma for clarity.
+                    group_str = " ".join(groups) 
+                    entries.append(f"**{role}**: {group_str}")
+                
+                results["matches"].append({
+                    "group": artist_name, # Use the group field for the Artist Name header
+                    "entries": entries
+                })
+                
+            if not results["matches"]:
+                results["filtered_empty"] = True
+                
+            return results
+
+        # 3. Standard Filtering Mode (Group/Role)
         for menu in data.get("menus", []):
             group_name = menu.get("name", "")
             
