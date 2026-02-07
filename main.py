@@ -26,6 +26,7 @@ class SakugaBot(commands.Bot):
             headers={"User-Agent": "SakugaQuizBot/1.0 (Discord Bot)"}
         )
         await self.load_extension('cogs.quiz')
+        await self.load_extension('cogs.info')
         print("Bot setup complete.")
 
     async def on_ready(self):
