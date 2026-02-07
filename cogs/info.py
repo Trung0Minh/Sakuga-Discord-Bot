@@ -17,7 +17,7 @@ class ShowSelect(discord.ui.Select):
             if slug:
                 options.append(discord.SelectOption(label=label, description=desc, value=slug))
         
-        super().__init__(placeholder="Select a show...", min_values=1, max_values=1, options=options)
+        super().__init__(placeholder="Select a show...", min_values=1, max_values=1, options=options, row=0)
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
@@ -46,15 +46,59 @@ class ShowSelect(discord.ui.Select):
             await interaction.followup.send("No matches found with the current filters.", ephemeral=True)
             return
 
-        # Edit original message with the first page
-        view = PaginationView(embeds) if len(embeds) > 1 else None
-        await interaction.followup.edit_message(message_id=self.original_interaction.message.id if self.original_interaction.message else interaction.message.id, content=None, embed=embeds[0], view=view)
+        # Update view state
+        self.view.embeds = embeds
+        self.view.current_page = 0
+        self.view.update_buttons()
+        
+        # Edit message with new embed and SAME view (to keep dropdown)
+        await interaction.followup.edit_message(
+            message_id=self.original_interaction.message.id if self.original_interaction.message else interaction.message.id, 
+            content=None, 
+            embed=embeds[0], 
+            view=self.view
+        )
 
 class ShowSelectView(discord.ui.View):
     def __init__(self, search_results, interaction, filters, bot):
-        super().__init__(timeout=60)
+        super().__init__(timeout=120)
         self.bot = bot
+        self.embeds = []
+        self.current_page = 0
+        
+        # Add Select Menu
         self.add_item(ShowSelect(search_results, interaction, filters))
+
+    def update_buttons(self):
+        # Enable/Disable buttons based on pages
+        has_pages = len(self.embeds) > 1
+        
+        # We need to find the buttons in children. 
+        # They are usually at indices 1 and 2 if Select is 0.
+        # But to be safe, we can reference them by custom_id or type if we set them.
+        # Easier: Just iterate and check type or label.
+        
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                if not has_pages:
+                    child.disabled = True
+                else:
+                    if child.label == "Previous":
+                        child.disabled = (self.current_page == 0)
+                    elif child.label == "Next":
+                        child.disabled = (self.current_page == len(self.embeds) - 1)
+
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary, row=1, disabled=True)
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page = max(0, self.current_page - 1)
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.embeds[self.current_page], view=self)
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.primary, row=1, disabled=True)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page = min(len(self.embeds) - 1, self.current_page + 1)
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.embeds[self.current_page], view=self)
 
     def create_embeds(self, processed, image_url=None):
         embeds = []
@@ -85,7 +129,9 @@ class ShowSelectView(discord.ui.View):
                         # value is average count
                         desc += f"**{i+1}. {name}**: {value:.2f} per ep\n"
                 
-                # Truncate if too long (20 items max usually fine for description < 4096 chars)
+                # Truncate if too long
+                if len(desc) > 4000:
+                    desc = desc[:4000] + "... (truncated)"
                 embed.description = desc
             
             embeds.append(embed)
@@ -104,11 +150,9 @@ class ShowSelectView(discord.ui.View):
             entries = "\n".join(group['entries'])
             
             # Check limits (Embed total 6000, Field value 1024)
-            # We cut slightly conservatively
             if len(entries) > 1000:
                 entries = entries[:1000] + "... (truncated)"
             
-            # If adding this field exceeds limit, start new embed
             if current_length + len(entries) > 3000 or len(current_embed.fields) >= 20:
                 embeds.append(current_embed)
                 current_embed = discord.Embed(title=f"Staff List: {title} (Cont.)", color=0x00b0f4)
@@ -122,29 +166,6 @@ class ShowSelectView(discord.ui.View):
             embeds.append(current_embed)
             
         return embeds
-
-class PaginationView(discord.ui.View):
-    def __init__(self, embeds):
-        super().__init__(timeout=120)
-        self.embeds = embeds
-        self.current_page = 0
-        self.update_buttons()
-
-    def update_buttons(self):
-        self.children[0].disabled = (self.current_page == 0) # Previous
-        self.children[1].disabled = (self.current_page == len(self.embeds) - 1) # Next
-
-    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary)
-    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.current_page = max(0, self.current_page - 1)
-        self.update_buttons()
-        await interaction.response.edit_message(embed=self.embeds[self.current_page], view=self)
-
-    @discord.ui.button(label="Next", style=discord.ButtonStyle.primary)
-    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.current_page = min(len(self.embeds) - 1, self.current_page + 1)
-        self.update_buttons()
-        await interaction.response.edit_message(embed=self.embeds[self.current_page], view=self)
 
 class Info(commands.Cog):
     def __init__(self, bot):
@@ -163,10 +184,9 @@ class Info(commands.Cog):
         app_commands.Choice(name="Role Average", value="role_average")
     ])
     async def staff(self, interaction: discord.Interaction, query: str, group: str = None, role: str = None, artist: str = None, statistics: app_commands.Choice[str] = None):
-        # 1. Validate Inputs
         if not any([group, role, artist, statistics]):
             await interaction.response.send_message(
-                "❌ **Missing Filters**: You must provide at least one filter option to prevent large data dumps.\n"
+                "❌ **Missing Filters**: You must provide at least one filter option.\n"
                 "Please use one of: `group`, `role`, `artist`, or `statistics`.",
                 ephemeral=True
             )
@@ -174,7 +194,6 @@ class Info(commands.Cog):
 
         await interaction.response.defer()
 
-        # 2. Search for the show
         results, error = await KeyframeAPI.search(self.bot.session, query)
         
         if error:
@@ -185,10 +204,7 @@ class Info(commands.Cog):
             await interaction.followup.send(f"No shows found for `{query}`.")
             return
             
-        # Get statistics value if present
         stats_value = statistics.value if statistics else None
-
-        # 3. Store filters for the callback
         filters = {
             'group': group,
             'role': role,
@@ -196,8 +212,11 @@ class Info(commands.Cog):
             'statistics': stats_value
         }
 
-        # 4. If exact match or only 1 result, auto-select?
+        # Use the combined view for both single and multiple results to ensure consistent behavior
+        view = ShowSelectView(results, interaction, filters, self.bot)
+        
         if len(results) == 1:
+            # Auto-select logic using the view's internal methods
             slug = results[0]['slug']
             data, error = await KeyframeAPI.get_staff_data(self.bot.session, slug)
             if error:
@@ -212,20 +231,19 @@ class Info(commands.Cog):
                 statistics_mode=filters.get('statistics')
             )
             
-            # Create a temporary View just to access the helper method
-            temp_view = ShowSelectView([], interaction, filters, self.bot)
-            embeds = temp_view.create_embeds(processed, data.get('anilist', {}).get('coverImage', {}).get('large'))
+            embeds = view.create_embeds(processed, data.get('anilist', {}).get('coverImage', {}).get('large'))
             
             if not embeds:
                 await interaction.followup.send("No matches found with the current filters.")
                 return
 
-            view = PaginationView(embeds) if len(embeds) > 1 else None
+            view.embeds = embeds
+            view.update_buttons()
+            
+            # Send with the view so the dropdown (and buttons) are present
             await interaction.followup.send(embed=embeds[0], view=view)
         
         else:
-            # 5. Show Select Menu
-            view = ShowSelectView(results, interaction, filters, self.bot)
             await interaction.followup.send(f"Found {len(results)} matches for `{query}`. Please select one:", view=view)
 
 async def setup(bot):

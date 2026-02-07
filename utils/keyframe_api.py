@@ -122,9 +122,12 @@ class KeyframeAPI:
                 # Map Role -> List of counts (one count per episode)
                 role_counts_per_ep = defaultdict(list)
                 
-                total_groups = len(data.get("menus", []))
+                # Only count actual episodes (starting with #) for the average denominator logic
+                # This aligns better with typical "per episode" stats
+                episodes = [m for m in data.get("menus", []) if m.get("name", "").startswith("#")]
+                total_episodes = len(episodes)
                 
-                for menu in data.get("menus", []):
+                for menu in episodes:
                     # We need to track counts for *this* episode specifically
                     current_ep_role_counts = defaultdict(int)
                     
@@ -138,16 +141,13 @@ class KeyframeAPI:
                     for r, c in current_ep_role_counts.items():
                         role_counts_per_ep[r].append(c)
                 
-                # Calculate averages
-                # Average = Sum of counts / Total Groups (assuming we want avg per episode including 0s? 
-                # Usually average is over episodes where the role appears, or over total episodes.
-                # Let's do over total episodes for consistency, or len(role_counts_per_ep[r]) if it's only appended when present.
-                # Since we loop all menus, if a role isn't in a menu, it won't be in the list.
-                # To be accurate "Average per episode", we should divide by `total_groups`.
-                
                 avg_data = []
                 for role, counts in role_counts_per_ep.items():
-                    avg = sum(counts) / total_groups if total_groups > 0 else 0
+                    # Calculate average over total episodes (including those where role might be 0 if not listed? 
+                    # The current logic only appends if found in the loop. 
+                    # If a role is missing from an episode's credits, it's effectively 0.
+                    # So Sum / Total Episodes is correct.
+                    avg = sum(counts) / total_episodes if total_episodes > 0 else 0
                     avg_data.append((role, avg))
                 
                 # Sort by average
@@ -166,6 +166,8 @@ class KeyframeAPI:
             af = artist_filter.lower()
             
             for menu in data.get("menus", []):
+                group_name = menu.get("name", "").replace("#", "") # Remove # for cleaner list if desired, or keep it.
+                # Keeping the style from request: #01, OP, ED...
                 group_name = menu.get("name", "")
                 
                 for credit in menu.get("credits", []):
@@ -200,7 +202,7 @@ class KeyframeAPI:
                 entries = []
                 # Sort roles alphabetically
                 for role, groups in sorted(roles.items()):
-                    group_str = "".join(groups) # User asked for #01#02#03... style for compactness
+                    group_str = ":".join(groups) # User asked for #01#02#03... style for compactness
                     entries.append(f"**{role}**: {group_str}")
                 
                 results["matches"].append({
@@ -249,7 +251,7 @@ class KeyframeAPI:
             for role_name, artists in role_data.items():
                 entries = []
                 for artist_name, groups in sorted(artists.items()):
-                    group_str = "".join(groups)
+                    group_str = ":".join(groups)
                     entries.append(f"**{artist_name}**: {group_str}")
 
                 results["matches"].append({
