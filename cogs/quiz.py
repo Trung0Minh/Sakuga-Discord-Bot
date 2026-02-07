@@ -40,7 +40,7 @@ class Quiz(commands.Cog):
             "**Options:**\n"
             "- `tags`: Space-separated Sakugabooru tags (e.g., `explosions effects`).\n"
             "- `rounds`: Number of rounds (max 20).\n"
-            "- `players`: Mention friends to whitelist them (e.g., `@Friend1`).\n"
+            "- `players`: Mention friends to whitelist them (e.g., `@Haves`).\n"
             "- `mode`: Choose between Normal, Strict, Blind, or Hardcore."
         ), inline=False)
 
@@ -51,7 +51,7 @@ class Quiz(commands.Cog):
 
         embed.add_field(name="Game Modes", value=(
             "**Normal**: Standard guessing in chat.\n"
-            "**Strict**: Deducts 0.5 points for wrong guesses. **MUST use `.` prefix (e.g. `.yutapon`)**.\n"
+            "**Strict**: Deducts 0.5 points for wrong guesses. **MUST use `;` prefix (e.g. ';yutapon`)**.\n"
             "**Blind**: Guesses are hidden from other players (must use `/g`).\n"
             "**Hardcore**: Combines Strict and Blind modes."
         ), inline=False)
@@ -125,12 +125,12 @@ class Quiz(commands.Cog):
     @app_commands.describe(
         tags="Sakugabooru tags to filter (separate by space, e.g. 'explosions effects')",
         rounds="Number of rounds to play",
-        players="Mention users to whitelist (e.g. '@User1 @User2'). If empty, only you play.",
+        players="Mention users to whitelist (e.g. '@Haves @Goose'). If empty, only you play.",
         mode="Game mode: Normal, Strict, Blind, Hardcore"
     )
     @app_commands.choices(mode=[
         app_commands.Choice(name="Normal", value="normal"),
-        app_commands.Choice(name="Strict (khắc chế sv Hs :tri:)", value="strict"),
+        app_commands.Choice(name="Strict (khắc chế sv Hs :tri: thuần đoán)", value="strict"),
         app_commands.Choice(name="Blind", value="blind"),
         app_commands.Choice(name="Hardcore", value="hardcore")
     ])

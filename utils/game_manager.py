@@ -57,7 +57,7 @@ class GameSession:
             await asyncio.sleep(2)
             await self.start_round(channel)
         else:
-            await channel.send(f"Skip vote registered ({current}/{needed})")
+            await channel.send(f"Skip vote ({current}/{needed})")
 
     async def start_round(self, ctx):
         if self.current_round >= self.total_rounds:
@@ -107,7 +107,7 @@ class GameSession:
             view = GuessView(self)
             embed.set_footer(text="Blind Mode: Use /g <name> to guess!")
         elif self.mode == "strict":
-            embed.set_footer(text="Strict Mode: Use '.' prefix to guess (e.g. .yutapon)")
+            embed.set_footer(text="Strict Mode: Use ';' prefix to guess (e.g. ;yutapon)")
 
         try:
             await ctx.send(embed=embed, view=view)
@@ -148,7 +148,7 @@ class GameSession:
         
         # In strict mode, only treat as guess if it starts with '.'
         if self.mode == "strict":
-            if not content.startswith("."):
+            if not content.startswith(";"):
                 return False
             content = content[1:].strip() # Remove the '.' and any following whitespace
         
@@ -181,7 +181,7 @@ class GameSession:
         if sorted_scores:
             description = ""
             for i, (uid, score) in enumerate(sorted_scores, 1):
-                description += f"{i}. <@{uid}> - {score:.1f} points\n" # Format float nicely
+                description += f"{i}. <@{uid}>: {score:.1f} points\n" # Format float nicely
             embed.description = description
         else:
             embed.description = "No one scored any points!"
