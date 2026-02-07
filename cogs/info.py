@@ -9,7 +9,6 @@ class ShowSelect(discord.ui.Select):
         self.filters = filters
         
         options = []
-        # Limit to 25 options (Discord limit)
         for show in search_results[:25]:
             label = show.get('name', 'Unknown')[:100]
             desc = str(show.get('seasonYear') or 'Unknown Year')
@@ -21,58 +20,89 @@ class ShowSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        
         slug = self.values[0]
-        # Fetch full data
-        session = self.view.bot.session
-        data, error = await KeyframeAPI.get_staff_data(session, slug)
+        await self.view.update_show(interaction, slug)
+
+class EpisodeSelect(discord.ui.Select):
+    def __init__(self, menus):
+        options = []
+        # Get first 25 menus (Overview, OP, ED, #01, etc.)
+        for menu in menus[:25]:
+            name = menu.get('name', 'Unknown')
+            options.append(discord.SelectOption(label=name, value=name))
         
+        super().__init__(placeholder="Select an episode/group...", min_values=1, max_values=1, options=options, row=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        self.view.filters['episode'] = self.values[0]
+        # Clear other specific filters if selecting an episode? 
+        # User said "allow more than one option", so we keep artist/role if they exist.
+        await self.view.refresh_display(interaction)
+
+class ShowSelectView(discord.ui.View):
+    def __init__(self, search_results, interaction, filters, bot):
+        super().__init__(timeout=180)
+        self.bot = bot
+        self.interaction = interaction
+        self.filters = filters
+        self.embeds = []
+        self.current_page = 0
+        self.current_data = None # Full JSON data of the selected show
+        
+        # Add Show Select
+        if search_results:
+            self.add_item(ShowSelect(search_results, interaction, filters))
+
+    async def update_show(self, interaction, slug):
+        data, error = await KeyframeAPI.get_staff_data(self.bot.session, slug)
         if error:
             await interaction.followup.send(f"Error fetching data: {error}", ephemeral=True)
             return
+        
+        self.current_data = data
+        
+        # Update/Add Episode Select
+        # Remove old EpisodeSelect if exists
+        self.children = [c for child in self.children if not isinstance(child, EpisodeSelect)]
+        
+        menus = data.get('menus', [])
+        if menus:
+            self.add_item(EpisodeSelect(menus))
             
-        # Process data with stored filters
+        await self.refresh_display(interaction)
+
+    async def refresh_display(self, interaction):
+        if not self.current_data:
+            return
+
         processed = KeyframeAPI.process_data(
-            data, 
-            group_filter=self.filters.get('group'),
+            self.current_data, 
+            episode_filter=self.filters.get('episode'),
             role_filter=self.filters.get('role'),
             artist_filter=self.filters.get('artist'),
             statistics_mode=self.filters.get('statistics')
         )
 
-        embeds = self.view.create_embeds(processed, data.get('anilist', {}).get('coverImage', {}).get('large'))
+        image_url = self.current_data.get('anilist', {}).get('coverImage', {}).get('large')
+        self.embeds = self.create_embeds(processed, image_url)
         
-        if not embeds:
+        if not self.embeds:
             await interaction.followup.send("No matches found with the current filters.", ephemeral=True)
             return
 
-        # Update view state
-        self.view.embeds = embeds
-        self.view.current_page = 0
-        self.view.update_buttons()
+        self.current_page = 0
+        self.update_buttons()
         
-        # Edit message with new embed and SAME view (to keep dropdown)
         await interaction.followup.edit_message(
-            message_id=self.original_interaction.message.id if self.original_interaction.message else interaction.message.id, 
+            message_id=self.interaction.message.id if self.interaction.message else interaction.message.id, 
             content=None, 
-            embed=embeds[0], 
-            view=self.view
+            embed=self.embeds[0], 
+            view=self
         )
 
-class ShowSelectView(discord.ui.View):
-    def __init__(self, search_results, interaction, filters, bot):
-        super().__init__(timeout=120)
-        self.bot = bot
-        self.embeds = []
-        self.current_page = 0
-        
-        # Add Select Menu
-        self.add_item(ShowSelect(search_results, interaction, filters))
-
     def update_buttons(self):
-        # Enable/Disable buttons based on pages
         has_pages = len(self.embeds) > 1
-        
         for child in self.children:
             if isinstance(child, discord.ui.Button):
                 if not has_pages:
@@ -83,13 +113,13 @@ class ShowSelectView(discord.ui.View):
                     elif child.label == "Next":
                         child.disabled = (self.current_page == len(self.embeds) - 1)
 
-    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary, row=1, disabled=True)
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary, row=2, disabled=True)
     async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_page = max(0, self.current_page - 1)
         self.update_buttons()
         await interaction.response.edit_message(embed=self.embeds[self.current_page], view=self)
 
-    @discord.ui.button(label="Next", style=discord.ButtonStyle.primary, row=1, disabled=True)
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.primary, row=2, disabled=True)
     async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_page = min(len(self.embeds) - 1, self.current_page + 1)
         self.update_buttons()
@@ -99,14 +129,10 @@ class ShowSelectView(discord.ui.View):
         embeds = []
         title = processed['title']
         
-        # 1. Stats Embed
         if processed.get('stats'):
             s = processed['stats']
             stat_type = s.get('type')
-            
             embed_title = f"Staff Statistics ({'Appearance' if stat_type == 'appearance' else 'Role Average'}): {title}"
-            
-            # Format data based on type
             data_list = s.get('data', [])
             
             if not data_list:
@@ -131,15 +157,12 @@ class ShowSelectView(discord.ui.View):
                         current_desc = line + "\n"
                     else:
                         current_desc += line + "\n"
-                
                 if current_desc:
                     embed = discord.Embed(title=embed_title, color=0x00ff00, description=current_desc)
                     if image_url: embed.set_thumbnail(url=image_url)
                     embeds.append(embed)
-            
             return embeds
 
-        # 2. List Embeds (Paginated)
         if processed['filtered_empty']:
             return []
 
@@ -154,7 +177,6 @@ class ShowSelectView(discord.ui.View):
         
         for group in processed['matches']:
             group_name = group['group']
-            
             if len(current_embed.fields) >= 20 or current_total_length > 5000:
                 embeds.append(current_embed)
                 current_embed = get_new_embed(True)
@@ -190,7 +212,6 @@ class ShowSelectView(discord.ui.View):
         
         if current_embed.fields:
             embeds.append(current_embed)
-            
         return embeds
 
 class Info(commands.Cog):
@@ -200,7 +221,7 @@ class Info(commands.Cog):
     @app_commands.command(name="staff", description="Search specific staff credits from keyframe-staff-list.com")
     @app_commands.describe(
         query="The name of the anime to search for",
-        group="Filter by Group/Episode (e.g., '#01', 'OP', 'ED')",
+        episode="Filter by Episode/Group (e.g., '#01', 'OP', 'ED')",
         role="Filter by Role (e.g., 'Key Animation', 'Director')",
         artist="Filter by Artist Name",
         statistics="Show summary statistics instead of a list"
@@ -209,30 +230,28 @@ class Info(commands.Cog):
         app_commands.Choice(name="Staff Appearance", value="appearance"),
         app_commands.Choice(name="Role Average", value="role_average")
     ])
-    async def staff(self, interaction: discord.Interaction, query: str, group: str = None, role: str = None, artist: str = None, statistics: app_commands.Choice[str] = None):
-        if not any([group, role, artist, statistics]):
+    async def staff(self, interaction: discord.Interaction, query: str, episode: str = None, role: str = None, artist: str = None, statistics: app_commands.Choice[str] = None):
+        if not any([episode, role, artist, statistics]):
             await interaction.response.send_message(
                 "❌ **Missing Filters**: You must provide at least one filter option.\n"
-                "Please use one of: `group`, `role`, `artist`, or `statistics`.",
+                "Please use one of: `episode`, `role`, `artist`, or `statistics`.",
                 ephemeral=True
             )
             return
 
         await interaction.response.defer()
-
         results, error = await KeyframeAPI.search(self.bot.session, query)
         
         if error:
             await interaction.followup.send(f"API Error: {error}")
             return
-        
         if not results:
             await interaction.followup.send(f"No shows found for `{query}`.")
             return
             
         stats_value = statistics.value if statistics else None
         filters = {
-            'group': group,
+            'episode': episode,
             'role': role,
             'artist': artist,
             'statistics': stats_value
@@ -241,30 +260,7 @@ class Info(commands.Cog):
         view = ShowSelectView(results, interaction, filters, self.bot)
         
         if len(results) == 1:
-            slug = results[0]['slug']
-            data, error = await KeyframeAPI.get_staff_data(self.bot.session, slug)
-            if error:
-                await interaction.followup.send(f"Error fetching data: {error}")
-                return
-
-            processed = KeyframeAPI.process_data(
-                data, 
-                group_filter=filters.get('group'),
-                role_filter=filters.get('role'),
-                artist_filter=filters.get('artist'),
-                statistics_mode=filters.get('statistics')
-            )
-            
-            embeds = view.create_embeds(processed, data.get('anilist', {}).get('coverImage', {}).get('large'))
-            
-            if not embeds:
-                await interaction.followup.send("No matches found with the current filters.")
-                return
-
-            view.embeds = embeds
-            view.update_buttons()
-            await interaction.followup.send(embed=embeds[0], view=view)
-        
+            await view.update_show(interaction, results[0]['slug'])
         else:
             await interaction.followup.send(f"Found {len(results)} matches for `{query}`. Please select one:", view=view)
 
