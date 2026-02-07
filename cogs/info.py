@@ -37,7 +37,7 @@ class ShowSelect(discord.ui.Select):
             group_filter=self.filters.get('group'),
             role_filter=self.filters.get('role'),
             artist_filter=self.filters.get('artist'),
-            show_stats=self.filters.get('statistics')
+            statistics_mode=self.filters.get('statistics')
         )
 
         embeds = self.view.create_embeds(processed, data.get('anilist', {}).get('coverImage', {}).get('large'))
@@ -204,7 +204,13 @@ class Info(commands.Cog):
                 await interaction.followup.send(f"Error fetching data: {error}")
                 return
 
-            processed = KeyframeAPI.process_data(data, **filters)
+            processed = KeyframeAPI.process_data(
+                data, 
+                group_filter=filters.get('group'),
+                role_filter=filters.get('role'),
+                artist_filter=filters.get('artist'),
+                statistics_mode=filters.get('statistics')
+            )
             
             # Create a temporary View just to access the helper method
             temp_view = ShowSelectView([], interaction, filters, self.bot)
