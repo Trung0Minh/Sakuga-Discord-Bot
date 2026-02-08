@@ -1,5 +1,5 @@
 import discord
-from discord import app_commands
+from discord import app_commands, ui
 from discord.ext import commands
 from utils.keyframe_api import KeyframeAPI
 import traceback
@@ -20,20 +20,161 @@ class ShowSelect(discord.ui.Select):
         await interaction.response.defer()
         await self.view.update_show(interaction, self.values[0])
 
-class EpisodeSelect(discord.ui.Select):
-    def __init__(self, menus, current_val=None):
+class ScopeSelect(discord.ui.Select):
+    def __init__(self, scopes, current_scope):
         options = []
-        for menu in menus[:25]:
-            name = menu.get('name', 'Unknown')
-            is_default = (name == current_val)
-            options.append(discord.SelectOption(label=name, value=name, default=is_default))
+        for scope in scopes:
+            options.append(discord.SelectOption(label=scope, value=scope, default=(scope == current_scope)))
         
-        super().__init__(placeholder="Select an episode/group...", min_values=1, max_values=1, options=options, row=1)
+        super().__init__(placeholder="Select Category...", min_values=1, max_values=1, options=options, row=1)
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        self.view.filters['episode'] = self.values[0]
+        await self.view.update_scope(interaction, self.values[0])
+
+class UnitSelect(discord.ui.Select):
+    def __init__(self, full_menus, current_val=None, page=0, scope="Episodes"):
+        self.full_menus = full_menus
+        self.page = page
+        self.scope = scope
+        self.per_page = 23
+
+        # Filter menus based on scope
+        self.filtered_menus = self._filter_menus(full_menus, scope)
+        
+        start = page * self.per_page
+        end = start + self.per_page
+        current_slice = self.filtered_menus[start:end]
+
+        options = []
+        if page > 0:
+            options.append(discord.SelectOption(label="Previous...", value="PREV_PAGE", description="Load previous items"))
+
+        found_current = False
+        for menu in current_slice:
+            name = menu.get('name', 'Unknown')
+            is_default = (name == current_val)
+            if is_default: found_current = True
+            options.append(discord.SelectOption(label=name, value=name, default=is_default))
+        
+        # If the current value isn't in this page (e.g. jumped to it), adding it might break page logic visually
+        # but usually we jump to the correct page. 
+        
+        if end < len(self.filtered_menus):
+            options.append(discord.SelectOption(label="Next...", value="NEXT_PAGE", description="Load next items"))
+        
+        placeholder = f"Select {scope[:-1]} (Page {page+1})..." # "Select Episode..."
+        if not options:
+            placeholder = "No items in this category."
+            options.append(discord.SelectOption(label="Empty", value="EMPTY", default=False))
+            
+        super().__init__(placeholder=placeholder, min_values=1, max_values=1, options=options, row=2, disabled=(not self.filtered_menus))
+
+    def _filter_menus(self, menus, scope):
+        filtered = []
+        for m in menus:
+            name = m.get('name', '').lower()
+            if scope == "Openings":
+                if name.startswith('op') or name.startswith('opening'):
+                    filtered.append(m)
+            elif scope == "Endings":
+                if name.startswith('ed') or name.startswith('ending'):
+                    filtered.append(m)
+            else: # Episodes
+                # Exclude OPs and EDs
+                if not (name.startswith('op') or name.startswith('opening') or name.startswith('ed') or name.startswith('ending')):
+                    filtered.append(m)
+        return filtered
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        selected = self.values[0]
+
+        if selected == "EMPTY": return
+
+        if selected == "PREV_PAGE":
+            new_select = UnitSelect(self.full_menus, current_val=self.view.filters.get('episode'), page=self.page - 1, scope=self.scope)
+            self.view.update_unit_select(new_select)
+            await interaction.edit_original_response(view=self.view)
+            return
+
+        if selected == "NEXT_PAGE":
+            new_select = UnitSelect(self.full_menus, current_val=self.view.filters.get('episode'), page=self.page + 1, scope=self.scope)
+            self.view.update_unit_select(new_select)
+            await interaction.edit_original_response(view=self.view)
+            return
+
+        self.view.filters['episode'] = selected
         await self.view.update_categories(interaction)
+
+class JumpModal(ui.Modal, title="Jump to Episode"):
+    query = ui.TextInput(label="Episode Number or Name", placeholder="e.g. 1, 1050, OP2", min_length=1)
+
+    def __init__(self, view):
+        super().__init__()
+        self.parent_view = view
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        q = self.query.value.lower().strip()
+        menus = self.parent_view.current_data.get('menus', [])
+        
+        match = None
+        # 1. Exact match
+        for m in menus:
+            if m.get('name', '').lower() == q:
+                match = m
+                break
+        
+        # 2. Number match for episodes (e.g. user types "100" -> matches "#100")
+        if not match:
+            for m in menus:
+                name = m.get('name', '').lower()
+                # Check if name is exactly "#" + q
+                if name == f"#{q}":
+                    match = m
+                    break
+
+        # 3. Fuzzy/Substring match
+        if not match:
+            for m in menus:
+                if q in m.get('name', '').lower():
+                    match = m
+                    break
+        
+        if match:
+            target_name = match['name']
+            self.parent_view.filters['episode'] = target_name
+            
+            # Determine scope of the target
+            lname = target_name.lower()
+            new_scope = "Episodes"
+            if lname.startswith('op') or lname.startswith('opening'): new_scope = "Openings"
+            elif lname.startswith('ed') or lname.startswith('ending'): new_scope = "Endings"
+            
+            self.parent_view.current_scope = new_scope
+            
+            # Find page number
+            unit_select = UnitSelect(menus, scope=new_scope)
+            filtered = unit_select.filtered_menus
+            try:
+                idx = next(i for i, x in enumerate(filtered) if x['name'] == target_name)
+                page = idx // 23
+            except StopIteration:
+                page = 0
+
+            # Update View
+            self.parent_view.update_unit_select(UnitSelect(menus, current_val=target_name, page=page, scope=new_scope))
+            
+            # Update scope select visual state
+            for item in self.parent_view.children:
+                if isinstance(item, ScopeSelect):
+                    for opt in item.options:
+                        opt.default = (opt.value == new_scope)
+            
+            await self.parent_view.update_categories(interaction)
+        else:
+            await interaction.followup.send(f"Could not find episode/unit matching `{q}`", ephemeral=True)
 
 class CategorySelect(discord.ui.Select):
     def __init__(self, categories, current_val=None):
@@ -42,7 +183,7 @@ class CategorySelect(discord.ui.Select):
             is_default = (cat == current_val)
             options.append(discord.SelectOption(label=cat, value=cat, default=is_default))
         
-        super().__init__(placeholder="Filter by Role Group...", min_values=1, max_values=1, options=options, row=2)
+        super().__init__(placeholder="Filter by Role Group...", min_values=1, max_values=1, options=options, row=3)
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
@@ -64,17 +205,46 @@ class StatusSelect(discord.ui.Select):
         await self.view.refresh_display(interaction)
 
 class RoleSelect(discord.ui.Select):
-    def __init__(self, roles, current_val=None):
-        options = []
-        for role in roles[:25]:
-            is_default = (role == current_val)
-            options.append(discord.SelectOption(label=role, value=role, default=is_default))
+    def __init__(self, all_roles, current_val=None, page=0):
+        self.all_roles = all_roles
+        self.page = page
+        self.per_page = 23
         
-        super().__init__(placeholder="Select Role for Statistics...", min_values=1, max_values=1, options=options, row=2)
+        start = page * self.per_page
+        end = start + self.per_page
+        current_slice = all_roles[start:end]
+        
+        options = []
+        if page > 0:
+            options.append(discord.SelectOption(label="Previous roles...", value="PREV_PAGE"))
+            
+        for role in current_slice:
+            label = role[:100]
+            options.append(discord.SelectOption(label=label, value=role, default=(role == current_val)))
+            
+        if end < len(all_roles):
+            options.append(discord.SelectOption(label="Next roles...", value="NEXT_PAGE"))
+            
+        placeholder = f"Select Role (Page {page+1})..."
+        super().__init__(placeholder=placeholder, min_values=1, max_values=1, options=options, row=2)
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        self.view.filters['role'] = self.values[0]
+        selected = self.values[0]
+        
+        if selected == "PREV_PAGE":
+            new_select = RoleSelect(self.all_roles, current_val=self.view.filters.get('role'), page=self.page - 1)
+            self.view.update_role_select(new_select)
+            await interaction.edit_original_response(view=self.view)
+            return
+            
+        if selected == "NEXT_PAGE":
+            new_select = RoleSelect(self.all_roles, current_val=self.view.filters.get('role'), page=self.page + 1)
+            self.view.update_role_select(new_select)
+            await interaction.edit_original_response(view=self.view)
+            return
+
+        self.view.filters['role'] = selected
         await self.view.refresh_display(interaction)
 
 class ShowSelectView(discord.ui.View):
@@ -82,12 +252,14 @@ class ShowSelectView(discord.ui.View):
         super().__init__(timeout=180)
         self.bot = bot
         self.filters = filters
-        self.user_id = user_id # Store user ID to restrict interaction
+        self.user_id = user_id
         self.search_results = search_results
         self.embeds = []
         self.current_page = 0
         self.current_data = None
+        self.current_slug = None
         self.message_sent = False
+        self.current_scope = "Episodes"
         self._setup_initial_items()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -103,11 +275,11 @@ class ShowSelectView(discord.ui.View):
         self._add_pagination_buttons()
 
     def _add_pagination_buttons(self):
-        prev_btn = discord.ui.Button(label="Previous", style=discord.ButtonStyle.secondary, row=3, disabled=True)
+        prev_btn = discord.ui.Button(label="Previous", style=discord.ButtonStyle.secondary, row=4, disabled=True)
         prev_btn.callback = self.prev_button_callback
         self.add_item(prev_btn)
 
-        next_btn = discord.ui.Button(label="Next", style=discord.ButtonStyle.primary, row=3, disabled=True)
+        next_btn = discord.ui.Button(label="Next", style=discord.ButtonStyle.primary, row=4, disabled=True)
         next_btn.callback = self.next_button_callback
         self.add_item(next_btn)
 
@@ -121,17 +293,47 @@ class ShowSelectView(discord.ui.View):
         self.update_buttons()
         await interaction.response.edit_message(embed=self.embeds[self.current_page], view=self)
 
+    async def jump_button_callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(JumpModal(self))
+
+    def update_unit_select(self, new_select):
+        # Remove existing UnitSelect
+        for child in self.children:
+            if isinstance(child, UnitSelect):
+                self.remove_item(child)
+                break
+        self.add_item(new_select)
+
+    def update_role_select(self, new_select):
+        for child in self.children:
+            if isinstance(child, RoleSelect):
+                self.remove_item(child)
+                break
+        self.add_item(new_select)
+
     async def update_show(self, interaction, slug):
         try:
-            print(f"[DEBUG] update_show called for slug: {slug}")
+            self.current_slug = slug
             data, error = await KeyframeAPI.get_staff_data(self.bot.session, slug)
             if error:
                 await interaction.followup.send(f"Error fetching data: {error}", ephemeral=True)
                 return
             
             self.current_data = data
-            menus = data.get('menus', [])
+            menus = list(data.get('menus', []))
+
+            # Determine available scopes
+            has_ops = any('op' in m.get('name', '').lower() or 'opening' in m.get('name', '').lower() for m in menus)
+            has_eds = any('ed' in m.get('name', '').lower() or 'ending' in m.get('name', '').lower() for m in menus)
             
+            scopes = ["Episodes"]
+            if has_ops: scopes.append("Openings")
+            if has_eds: scopes.append("Endings")
+            self.available_scopes = scopes
+            
+            # Reset scope to Episodes (or first available)
+            self.current_scope = "Episodes"
+
             self.clear_items()
             if self.search_results:
                 self.add_item(ShowSelect(self.search_results, self.filters))
@@ -153,18 +355,44 @@ class ShowSelectView(discord.ui.View):
                         self.add_item(RoleSelect(sorted_roles, self.filters.get('role')))
             
             elif not artist_mode and not role_search_mode:
+                # Normal Mode with Scope Select and Unit Select
+                
+                # Add Scope Select if meaningful
+                if len(scopes) > 1:
+                    self.add_item(ScopeSelect(scopes, self.current_scope))
+                
+                # Set default episode if none
                 if not self.filters.get('episode') and menus:
                     self.filters['episode'] = menus[0]['name']
-                if menus:
-                    self.add_item(EpisodeSelect(menus, self.filters.get('episode')))
+
+                # Add Unit Select (filtered by default scope "Episodes")
+                self.add_item(UnitSelect(menus, self.filters.get('episode'), scope=self.current_scope))
+
+                # Add Category Select
                 categories = KeyframeAPI.get_role_categories(data, self.filters.get('episode'))
                 if categories:
                     self.add_item(CategorySelect(categories, self.filters.get('category')))
+                
+                # Add Jump Button
+                jump_btn = discord.ui.Button(label="Jump to...", style=discord.ButtonStyle.secondary, row=4, emoji="🔍")
+                jump_btn.callback = self.jump_button_callback
+                self.add_item(jump_btn)
 
             self._add_pagination_buttons()
             await self.refresh_display(interaction)
         except Exception as e:
             traceback.print_exc()
+
+    async def update_scope(self, interaction, new_scope):
+        self.current_scope = new_scope
+        menus = self.current_data.get('menus', [])
+        
+        unit_select = UnitSelect(menus, scope=new_scope)
+        if unit_select.filtered_menus:
+             self.filters['episode'] = unit_select.filtered_menus[0]['name']
+        
+        self.update_unit_select(unit_select)
+        await self.update_categories(interaction)
 
     async def update_categories(self, interaction):
         try:
@@ -192,11 +420,13 @@ class ShowSelectView(discord.ui.View):
             for child in self.children:
                 if isinstance(child, discord.ui.Select):
                     current_val = None
-                    if isinstance(child, EpisodeSelect): current_val = self.filters.get('episode')
+                    if isinstance(child, UnitSelect): current_val = self.filters.get('episode')
                     elif isinstance(child, CategorySelect): current_val = self.filters.get('category') or "All"
                     elif isinstance(child, StatusSelect): current_val = self.filters.get('status') or "All"
                     elif isinstance(child, RoleSelect): current_val = self.filters.get('role')
-                    if current_val:
+                    elif isinstance(child, ScopeSelect): current_val = self.current_scope
+                    
+                    if current_val and hasattr(child, 'options'):
                         for option in child.options: option.default = (option.value == current_val)
 
             processed = KeyframeAPI.process_data(
@@ -235,6 +465,7 @@ class ShowSelectView(discord.ui.View):
         has_pages = len(self.embeds) > 1
         for child in self.children:
             if isinstance(child, discord.ui.Button):
+                if child.label == "Jump to...": continue
                 if not has_pages: child.disabled = True
                 else:
                     if child.label == "Previous": child.disabled = (self.current_page == 0)
@@ -243,6 +474,7 @@ class ShowSelectView(discord.ui.View):
     def create_embeds(self, processed, image_url=None):
         embeds = []
         title = processed['title']
+        staff_link = f"**Staff List: [{title}](https://keyframe-staff-list.com/staff/{self.current_slug})**"
         
         if processed.get('stats'):
             s = processed['stats']
@@ -251,22 +483,31 @@ class ShowSelectView(discord.ui.View):
             data_list = s.get('data', [])
             
             if not data_list:
-                embed = discord.Embed(title=embed_title, color=0x00ff00, description="No data available.")
+                embed = discord.Embed(title=embed_title, color=0x00ff00, description=f"{staff_link}\n\nNo data available.")
                 if image_url: embed.set_thumbnail(url=image_url)
                 embeds.append(embed)
             else:
                 lines = []
+                import html
                 for i, (name_link, value) in enumerate(data_list):
                     count = len(value) if isinstance(value, (set, list)) else value
-                    lines.append(f"**{i+1}. {name_link}**: {count} eps")
+                    
+                    # Aggressively clean up the name/link to prevent multi-line issues
+                    nl = html.unescape(str(name_link)).replace("\n", " ").replace("\r", " ").replace("\t", " ").strip()
+                    
+                    if stat_type == "appearance":
+                        lines.append(f"{i+1}. {nl}: **{count} eps**")
+                    else: # role_average
+                        val_str = f"{count:.2f}" if isinstance(count, float) else str(count)
+                        lines.append(f"{i+1}. {nl}: **{val_str}**")
                 
-                current_desc = ""
+                current_desc = staff_link + "\n\n"
                 for line in lines:
                     if len(current_desc) + len(line) + 1 > 3800:
                         embed = discord.Embed(title=embed_title, color=0x00ff00, description=current_desc)
                         if image_url: embed.set_thumbnail(url=image_url)
                         embeds.append(embed)
-                        current_desc = line + "\n"
+                        current_desc = staff_link + "\n\n" + line + "\n"
                     else:
                         current_desc += line + "\n"
                 if current_desc:
@@ -279,7 +520,7 @@ class ShowSelectView(discord.ui.View):
 
         def get_new_embed(is_cont=False):
             t = f"Staff List: {title}" + (" (Cont.)" if is_cont else "")
-            emb = discord.Embed(title=t, color=0x00b0f4)
+            emb = discord.Embed(title=t, color=0x00b0f4, description=staff_link)
             if image_url: emb.set_thumbnail(url=image_url)
             return emb
 
@@ -289,9 +530,10 @@ class ShowSelectView(discord.ui.View):
 
         for group in processed['matches']:
             group_name = group['group']
+            sep = group.get('sep', "\n\n")
             field_content = ""
             for entry in group['entries']:
-                if len(field_content) + len(entry) + 2 > 1000:
+                if len(field_content) + len(entry) + len(sep) > 1000:
                     if field_content:
                         if current_total_length + len(field_content) > 5500 or len(current_embed.fields) >= 24:
                             embeds.append(current_embed)
@@ -322,7 +564,7 @@ class ShowSelectView(discord.ui.View):
                             else: temp_part += (", " if temp_part else "") + p
                         field_content = temp_part
                     else: field_content = entry
-                else: field_content += ("\n\n" if field_content else "") + entry
+                else: field_content += (sep if field_content else "") + entry
 
             if field_content:
                 if current_total_length + len(field_content) > 5500 or len(current_embed.fields) >= 24:

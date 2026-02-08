@@ -165,7 +165,7 @@ class KeyframeAPI:
                                 p_ja = person.get("ja", "")
                                 p_id = person.get("id")
                                 
-                                name_link = cls._format_name_link(p_en, p_ja, p_id)
+                                name_link = cls._format_name_link(p_en, p_ja, p_id).strip()
                                 artist_episodes[name_link].add(ep_name)
                 
                 # Sort by count
@@ -186,7 +186,7 @@ class KeyframeAPI:
                     
                     for credit in menu.get("credits", []):
                         for role_obj in credit.get("roles", []):
-                            role_name = role_obj.get("name", "Unknown")
+                            role_name = role_obj.get("name", "Unknown").strip()
                             count = len(role_obj.get("staff", []))
                             current_ep_role_counts[role_name] += count
                     
@@ -201,7 +201,7 @@ class KeyframeAPI:
                 avg_data.sort(key=lambda x: x[1], reverse=True)
                 results["stats"] = {
                     "type": "role_average",
-                    "data": avg_data[:20]
+                    "data": avg_data[:50]
                 }
 
             return results
@@ -235,21 +235,34 @@ class KeyframeAPI:
                             if (not p_en or af not in p_en.lower()) and (not p_ja or af not in p_ja.lower()):
                                 continue
                             
-                            # Construct Display Name and Link
+                            # Determine display name
+                            display_name = p_en
+                            if p_ja and p_en and p_en != p_ja:
+                                display_name = f"{p_en} ({p_ja})"
+                            elif not display_name:
+                                display_name = p_ja or "Unknown"
+
+                            # Construct Link
                             name_link = cls._format_name_link(p_en, p_ja, p_id)
-                            artist_data[name_link][role_name].append(group_name)
+                            
+                            artist_data[(display_name, name_link)][role_name].append(group_name)
 
             # Format the output for the embed
-            for artist_name, roles in artist_data.items():
+            for (display_name, name_link), roles in artist_data.items():
                 entries = []
+                # Add the clickable link as the first line if it's actually a link
+                if "(" in name_link and "[" in name_link:
+                    entries.append(name_link)
+
                 # Sort roles alphabetically
                 for role, groups in sorted(roles.items()):
                     group_str = ", ".join(groups) 
                     entries.append(f"**{role}**:\n{group_str}") # Role then newline
                 
                 results["matches"].append({
-                    "group": artist_name, 
-                    "entries": entries
+                    "group": display_name, 
+                    "entries": entries,
+                    "sep": "\n\n"
                 })
                 
             if not results["matches"]:
@@ -294,7 +307,8 @@ class KeyframeAPI:
 
                 results["matches"].append({
                     "group": role_name, # Header will be the Role Name
-                    "entries": entries
+                    "entries": entries,
+                    "sep": "\n" # Names stay next to each other vertically
                 })
 
             if not results["matches"]:
