@@ -3,48 +3,12 @@ import json
 import re
 import html
 import urllib.parse
-import difflib
 from collections import defaultdict
 
 class KeyframeAPI:
     SEARCH_URL = "https://keyframe-staff-list.com/api/search/?q={}"
     STAFF_PAGE_URL = "https://keyframe-staff-list.com/staff/{}"
     BOORU_SEARCH_URL = "https://sakugabooru.com/post?tags={}"
-
-    @staticmethod
-    def _is_fuzzy_match(query, target, threshold=0.75):
-        """Helper for smart matching of names and roles."""
-        if not query or not target:
-            return False
-        
-        q = query.lower().strip()
-        t = target.lower().strip()
-        
-        # 1. Simple substring check (fastest)
-        if q in t or t in q:
-            return True
-            
-        # 2. Token-based fuzzy check
-        q_tokens = q.split()
-        t_tokens = t.split()
-        
-        matches = 0
-        for qt in q_tokens:
-            best_word_ratio = 0
-            for tt in t_tokens:
-                # Substring match within tokens (e.g. "anim" in "animation")
-                if qt in tt or tt in qt:
-                    best_word_ratio = 1.0
-                    break
-                # Sequence matching for typos/plurals (e.g. "director" vs "directors")
-                ratio = difflib.SequenceMatcher(None, qt, tt).ratio()
-                if ratio > best_word_ratio:
-                    best_word_ratio = ratio
-            
-            if best_word_ratio >= threshold:
-                matches += 1
-                
-        return matches >= len(q_tokens)
 
     @staticmethod
     async def fetch_json(session, url):
@@ -193,7 +157,7 @@ class KeyframeAPI:
                     for credit in menu.get("credits", []):
                         for role_obj in credit.get("roles", []):
                             # Filter by the required role
-                            if not cls._is_fuzzy_match(role_filter, role_obj.get("name", "")):
+                            if rf not in role_obj.get("name", "").lower():
                                 continue
                                 
                             for person in role_obj.get("staff", []):
@@ -259,7 +223,7 @@ class KeyframeAPI:
                         role_name = role_obj.get("name", "")
                         
                         # Apply role filter if present
-                        if role_filter and not cls._is_fuzzy_match(role_filter, role_name):
+                        if role_filter and role_filter.lower() not in role_name.lower():
                             continue
 
                         for person in role_obj.get("staff", []):
@@ -268,7 +232,7 @@ class KeyframeAPI:
                             p_id = person.get("id")
                             
                             # Check if this person matches the artist filter
-                            if not cls._is_fuzzy_match(artist_filter, p_en) and not cls._is_fuzzy_match(artist_filter, p_ja):
+                            if (not p_en or af not in p_en.lower()) and (not p_ja or af not in p_ja.lower()):
                                 continue
                             
                             # Determine display name
@@ -323,7 +287,7 @@ class KeyframeAPI:
                         role_name = role_obj.get("name", "")
 
                         # Filter by Role
-                        if not cls._is_fuzzy_match(role_filter, role_name):
+                        if rf not in role_name.lower():
                             continue
 
                         for person in role_obj.get("staff", []):
