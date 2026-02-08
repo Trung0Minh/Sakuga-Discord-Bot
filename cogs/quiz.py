@@ -44,6 +44,15 @@ class Quiz(commands.Cog):
             "- `mode`: Choose between Normal, Strict, Blind, or Hardcore."
         ), inline=False)
 
+        embed.add_field(name="/staff", value=(
+            "Search staff credits and statistics from keyframe-staff-list.com.\n"
+            "**Options:**\n"
+            "- `query`: Name of the anime (e.g., `fate zero`).\n"
+            "- `role`: Filter by a specific role (e.g., `key animation`).\n"
+            "- `artist`: Filter by artist name (e.g., `yutapon`).\n"
+            "- `statistics`: Show Staff Appearance or Role Average stats."
+        ), inline=False)
+
         embed.add_field(name="/g", value=(
             "Guess the animator. **Required in Blind/Hardcore modes**.\n"
             "Usage: `/g name: Yucato thanh hóa`"
