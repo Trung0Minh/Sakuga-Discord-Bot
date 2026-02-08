@@ -443,7 +443,20 @@ class ShowSelectView(discord.ui.View):
                 await interaction.edit_original_response(content=f"⚠️ {processed['error_msg']}", embed=None, view=self)
                 return
 
+            # Try AniList cover first
             image_url = self.current_data.get('anilist', {}).get('coverImage', {}).get('large')
+            
+            # Fallback to search result KV if AniList is missing
+            if not image_url and self.search_results:
+                match = next((s for s in self.search_results if s.get('slug') == self.current_slug), None)
+                if match and match.get('kv'):
+                    kv = match['kv']
+                    if kv.startswith('http'):
+                        image_url = kv
+                    else:
+                        # Keyframe media storage base URL
+                        image_url = f"https://keyframe-staff-list.com/media/{kv}"
+
             self.embeds = self.create_embeds(processed, image_url)
             
             if not self.embeds:

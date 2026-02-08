@@ -236,11 +236,7 @@ class KeyframeAPI:
                                 continue
                             
                             # Determine display name
-                            display_name = p_en
-                            if p_ja and p_en and p_en != p_ja:
-                                display_name = f"{p_en} ({p_ja})"
-                            elif not display_name:
-                                display_name = p_ja or "Unknown"
+                            display_name = p_en or p_ja or "Unknown"
 
                             # Construct Link
                             name_link = cls._format_name_link(p_en, p_ja, p_id)
@@ -361,13 +357,7 @@ class KeyframeAPI:
     @classmethod
     def _format_name_link(cls, en_name, ja_name, person_id=None):
         """Helper to format name as a Markdown link. Prefers keyframe-staff-list ID."""
-        display_name = en_name
-        
-        # Determine display text
-        if ja_name and en_name and en_name != ja_name:
-            display_name = f"{en_name} ({ja_name})"
-        elif not display_name:
-            display_name = ja_name or "Unknown"
+        display_name = en_name or ja_name or "Unknown"
             
         # Create link
         if person_id:
