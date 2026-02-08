@@ -156,16 +156,20 @@ class KeyframeAPI:
                     ep_name = menu.get("name", "")
                     for credit in menu.get("credits", []):
                         for role_obj in credit.get("roles", []):
+                            role_name = role_obj.get("name", "").strip()
+                            if not role_name or role_name.lower() == "unknown":
+                                continue
+
                             # Filter by the required role
-                            if rf not in role_obj.get("name", "").lower():
+                            if rf not in role_name.lower():
                                 continue
                                 
                             for person in role_obj.get("staff", []):
-                                p_en = person.get("en", "")
-                                p_ja = person.get("ja", "")
-                                p_id = person.get("id")
+                                name_link = cls._format_name_link(person.get("en"), person.get("ja"), person.get("id"))
+                                if not name_link:
+                                    continue
                                 
-                                name_link = cls._format_name_link(p_en, p_ja, p_id).strip()
+                                name_link = name_link.strip()
                                 artist_episodes[name_link].add(ep_name)
                 
                 # Sort by count
@@ -186,9 +190,17 @@ class KeyframeAPI:
                     
                     for credit in menu.get("credits", []):
                         for role_obj in credit.get("roles", []):
-                            role_name = role_obj.get("name", "Unknown").strip()
-                            count = len(role_obj.get("staff", []))
-                            current_ep_role_counts[role_name] += count
+                            role_name = role_obj.get("name", "").strip()
+                            if not role_name or role_name.lower() == "unknown":
+                                continue
+                            
+                            # Filter out staff with no names before counting
+                            valid_staff_count = 0
+                            for person in role_obj.get("staff", []):
+                                if person.get("en") or person.get("ja"):
+                                    valid_staff_count += 1
+                                    
+                            current_ep_role_counts[role_name] += valid_staff_count
                     
                     for r, c in current_ep_role_counts.items():
                         role_counts_per_ep[r].append(c)
@@ -196,7 +208,8 @@ class KeyframeAPI:
                 avg_data = []
                 for role, counts in role_counts_per_ep.items():
                     avg = sum(counts) / total_groups if total_groups > 0 else 0
-                    avg_data.append((role, avg))
+                    if avg > 0:
+                        avg_data.append((role, avg))
                 
                 avg_data.sort(key=lambda x: x[1], reverse=True)
                 results["stats"] = {
@@ -220,7 +233,9 @@ class KeyframeAPI:
                         continue
 
                     for role_obj in credit.get("roles", []):
-                        role_name = role_obj.get("name", "")
+                        role_name = role_obj.get("name", "").strip()
+                        if not role_name or role_name.lower() == "unknown":
+                            continue
                         
                         # Apply role filter if present
                         if role_filter and role_filter.lower() not in role_name.lower():
@@ -235,12 +250,14 @@ class KeyframeAPI:
                             if (not p_en or af not in p_en.lower()) and (not p_ja or af not in p_ja.lower()):
                                 continue
                             
-                            # Determine display name
-                            display_name = p_en or p_ja or "Unknown"
-
                             # Construct Link
                             name_link = cls._format_name_link(p_en, p_ja, p_id)
+                            if not name_link:
+                                continue
                             
+                            # Determine display name for grouping
+                            display_name = p_en or p_ja
+
                             artist_data[(display_name, name_link)][role_name].append(group_name)
 
             # Format the output for the embed
@@ -280,18 +297,19 @@ class KeyframeAPI:
                         continue
 
                     for role_obj in credit.get("roles", []):
-                        role_name = role_obj.get("name", "")
+                        role_name = role_obj.get("name", "").strip()
+                        if not role_name or role_name.lower() == "unknown":
+                            continue
 
                         # Filter by Role
                         if rf not in role_name.lower():
                             continue
 
                         for person in role_obj.get("staff", []):
-                            p_en = person.get("en", "")
-                            p_ja = person.get("ja", "")
-                            p_id = person.get("id")
-                            
-                            name_link = cls._format_name_link(p_en, p_ja, p_id)
+                            name_link = cls._format_name_link(person.get("en"), person.get("ja"), person.get("id"))
+                            if not name_link:
+                                continue
+
                             role_data[role_name][name_link].append(group_name)
 
             # Format output
@@ -331,16 +349,15 @@ class KeyframeAPI:
                     continue
 
                 for role_obj in credit.get("roles", []):
-                    role_name = role_obj.get("name", "")
+                    role_name = role_obj.get("name", "").strip()
+                    if not role_name or role_name.lower() == "unknown":
+                        continue
                     
                     matching_staff = []
                     for person in role_obj.get("staff", []):
-                        p_en = person.get("en", "")
-                        p_ja = person.get("ja", "")
-                        p_id = person.get("id")
-                        
-                        name_link = cls._format_name_link(p_en, p_ja, p_id)
-                        matching_staff.append(name_link)
+                        name_link = cls._format_name_link(person.get("en"), person.get("ja"), person.get("id"))
+                        if name_link:
+                            matching_staff.append(name_link)
                     
                     if matching_staff:
                         # Format: Role:\nNames
@@ -357,7 +374,9 @@ class KeyframeAPI:
     @classmethod
     def _format_name_link(cls, en_name, ja_name, person_id=None):
         """Helper to format name as a Markdown link. Prefers keyframe-staff-list ID."""
-        display_name = en_name or ja_name or "Unknown"
+        display_name = en_name or ja_name
+        if not display_name:
+            return None
             
         # Create link
         if person_id:
