@@ -178,7 +178,7 @@ class KeyframeAPI:
                                 artist_episodes[name_link].add(ep_name)
                 
                 # Sort by count
-                sorted_artists = sorted(artist_episodes.items(), key=lambda x: len(x[1]), reverse=True)[:50] # Top 50
+                sorted_artists = sorted(artist_episodes.items(), key=lambda x: len(x[1]), reverse=True)
                 results["stats"] = {
                     "type": "appearance",
                     "data": sorted_artists # List of (NameLink, Set(Groups))
@@ -219,7 +219,7 @@ class KeyframeAPI:
                 avg_data.sort(key=lambda x: x[1], reverse=True)
                 results["stats"] = {
                     "type": "role_average",
-                    "data": avg_data[:50]
+                    "data": avg_data
                 }
 
             return results
