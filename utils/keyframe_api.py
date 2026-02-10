@@ -165,7 +165,12 @@ class KeyframeAPI:
                                 continue
                                 
                             for person in role_obj.get("staff", []):
-                                name_link = cls._format_name_link(person.get("en"), person.get("ja"), person.get("id"))
+                                name_link = cls._format_name_link(
+                                    person.get("en"), 
+                                    person.get("ja"), 
+                                    person.get("id"),
+                                    is_studio=person.get("isStudio", False)
+                                )
                                 if not name_link:
                                     continue
                                 
@@ -251,7 +256,12 @@ class KeyframeAPI:
                                 continue
                             
                             # Construct Link
-                            name_link = cls._format_name_link(p_en, p_ja, p_id)
+                            name_link = cls._format_name_link(
+                                p_en, 
+                                p_ja, 
+                                p_id,
+                                is_studio=person.get("isStudio", False)
+                            )
                             if not name_link:
                                 continue
                             
@@ -306,7 +316,12 @@ class KeyframeAPI:
                             continue
 
                         for person in role_obj.get("staff", []):
-                            name_link = cls._format_name_link(person.get("en"), person.get("ja"), person.get("id"))
+                            name_link = cls._format_name_link(
+                                person.get("en"), 
+                                person.get("ja"), 
+                                person.get("id"),
+                                is_studio=person.get("isStudio", False)
+                            )
                             if not name_link:
                                 continue
 
@@ -353,15 +368,41 @@ class KeyframeAPI:
                     if not role_name or role_name.lower() == "unknown":
                         continue
                     
-                    matching_staff = []
-                    for person in role_obj.get("staff", []):
-                        name_link = cls._format_name_link(person.get("en"), person.get("ja"), person.get("id"))
+                    # Process staff with studio-aware formatting
+                    staff_list = role_obj.get("staff", [])
+                    processed_staff = []
+                    for person in staff_list:
+                        is_studio = person.get("isStudio", False)
+                        name_link = cls._format_name_link(
+                            person.get("en"), 
+                            person.get("ja"), 
+                            person.get("id"),
+                            is_studio=is_studio
+                        )
                         if name_link:
-                            matching_staff.append(name_link)
-                    
-                    if matching_staff:
-                        # Format: Role:\nNames
-                        group_match["entries"].append(f"**{role_name}**:\n{', '.join(matching_staff)}")
+                            processed_staff.append({"link": name_link, "is_studio": is_studio})
+
+                    if processed_staff:
+                        staff_str = ""
+                        for i in range(len(processed_staff)):
+                            current = processed_staff[i]
+                            staff_str += current["link"]
+                            
+                            if i < len(processed_staff) - 1:
+                                next_person = processed_staff[i+1]
+                                
+                                if not current["is_studio"] and next_person["is_studio"]:
+                                    # Staff followed by Studio: 2 newlines
+                                    staff_str += "\n\n"
+                                elif current["is_studio"] or next_person["is_studio"]:
+                                    # Studio followed by anything, OR anything followed by Studio (handled above)
+                                    # This covers Studio -> Staff and Studio -> Studio: 1 newline
+                                    staff_str += "\n"
+                                else:
+                                    # Staff -> Staff: comma
+                                    staff_str += ", "
+                                
+                        group_match["entries"].append(f"**{role_name}**:\n{staff_str}")
 
             if group_match["entries"]:
                 results["matches"].append(group_match)
@@ -372,12 +413,15 @@ class KeyframeAPI:
         return results
 
     @classmethod
-    def _format_name_link(cls, en_name, ja_name, person_id=None):
+    def _format_name_link(cls, en_name, ja_name, person_id=None, is_studio=False):
         """Helper to format name as a Markdown link. Prefers keyframe-staff-list ID."""
         display_name = en_name or ja_name
         if not display_name:
             return None
             
+        if is_studio:
+            display_name = f"**{display_name}**"
+
         # Create link
         if person_id:
             return f"[{display_name}](https://keyframe-staff-list.com/person/{person_id})"
