@@ -379,29 +379,42 @@ class KeyframeAPI:
                             person.get("id"),
                             is_studio=is_studio
                         )
-                        if name_link:
-                            processed_staff.append({"link": name_link, "is_studio": is_studio})
+                        # Store even empty names to detect separators in the source
+                        processed_staff.append({"link": name_link, "is_studio": is_studio})
 
-                    if processed_staff:
+                    if any(s["link"] for s in processed_staff):
                         staff_str = ""
                         for i in range(len(processed_staff)):
                             current = processed_staff[i]
+                            if not current["link"]:
+                                continue
+                                
                             staff_str += current["link"]
                             
                             if i < len(processed_staff) - 1:
-                                next_person = processed_staff[i+1]
+                                # Look ahead for next valid entry or separators
+                                next_valid = None
+                                has_separator = False
+                                for j in range(i + 1, len(processed_staff)):
+                                    if processed_staff[j]["link"]:
+                                        next_valid = processed_staff[j]
+                                        break
+                                    else:
+                                        has_separator = True
                                 
-                                if not current["is_studio"] and next_person["is_studio"]:
-                                    # Staff followed by Studio: 2 newlines
+                                if not next_valid:
+                                    continue
+
+                                if has_separator:
+                                    # Empty entries in JSON act as group separators: 2 newlines
                                     staff_str += "\n\n"
-                                elif current["is_studio"] or next_person["is_studio"]:
-                                    # Studio followed by anything, OR anything followed by Studio (handled above)
-                                    # This covers Studio -> Staff and Studio -> Studio: 1 newline
+                                elif current["is_studio"] or next_valid["is_studio"]:
+                                    # Studio transitions: 1 newline
                                     staff_str += "\n"
                                 else:
-                                    # Staff -> Staff: comma
+                                    # Staff to Staff: comma
                                     staff_str += ", "
-                                
+                        
                         group_match["entries"].append(f"**{role_name}**:\n{staff_str}")
 
             if group_match["entries"]:
@@ -415,7 +428,7 @@ class KeyframeAPI:
     @classmethod
     def _format_name_link(cls, en_name, ja_name, person_id=None, is_studio=False):
         """Helper to format name as a Markdown link. Prefers keyframe-staff-list ID."""
-        display_name = en_name or ja_name
+        display_name = (en_name or ja_name or "").strip()
         if not display_name:
             return None
             
