@@ -2,7 +2,9 @@ import discord
 from discord import app_commands, ui
 from discord.ext import commands
 from utils.keyframe_api import KeyframeAPI
+from utils.sakuga_api import SakugaAPI
 import traceback
+import re
 
 class ShowSelect(discord.ui.Select):
     def __init__(self, search_results, filters):
@@ -596,6 +598,14 @@ class ShowSelectView(discord.ui.View):
 class Info(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.ctx_menu = app_commands.ContextMenu(
+            name="Who is the animator?",
+            callback=self.who_context,
+        )
+        self.bot.tree.add_command(self.ctx_menu)
+
+    async def cog_unload(self):
+        self.bot.tree.remove_command(self.ctx_menu.name, type=self.ctx_menu.type)
 
     @app_commands.command(name="staff", description="Search specific staff credits from keyframe-staff-list.com")
     @app_commands.describe(
@@ -641,6 +651,89 @@ class Info(commands.Cog):
         else:
             await interaction.followup.send(f"Found {len(results)} matches for `{query}`. Please select one:", view=view)
             view.message_sent = True
+
+    async def get_artist_from_link(self, link: str):
+        """Helper to extract artist from a Sakugabooru link."""
+        # Extract MD5 or ID
+        md5_match = re.search(r'/data/([a-f0-9]{32})\.', link)
+        id_match = re.search(r'/post/show/(\d+)', link)
+        
+        post = None
+        if md5_match:
+            post, _ = await SakugaAPI.get_post_by_md5(self.bot.session, md5_match.group(1))
+        elif id_match:
+            post, _ = await SakugaAPI.get_post_by_id(self.bot.session, id_match.group(1))
+        
+        if post:
+            artists = await SakugaAPI.get_artist_from_tags(self.bot.session, post['tags'])
+            if not artists:
+                return "artist_unknown"
+            return ", ".join([a.title() for a in artists])
+        return None
+
+    @commands.command(name="who")
+    async def who(self, ctx, link: str = None):
+        """Find the animator from a link or a replied message."""
+        target_link = link
+        if not target_link and ctx.message.reference:
+            # Fetch the replied message
+            ref = ctx.message.reference
+            if ref.cached_message:
+                msg = ref.cached_message
+            else:
+                msg = await ctx.channel.fetch_message(ref.message_id)
+            
+            # Look for link in content or embeds
+            content = msg.content
+            # Check for links in content
+            matches = re.findall(r'https?://(?:www\.)?sakugabooru\.com/\S+', content)
+            if matches:
+                target_link = matches[0]
+            elif msg.embeds:
+                for embed in msg.embeds:
+                    if embed.url and "sakugabooru.com" in embed.url:
+                        target_link = embed.url
+                        break
+                    if embed.video and embed.video.url and "sakugabooru.com" in embed.video.url:
+                        target_link = embed.video.url
+                        break
+        
+        if not target_link:
+            await ctx.send("Please provide a Sakugabooru link or reply to a message containing one!", delete_after=10)
+            return
+
+        artist = await self.get_artist_from_link(target_link)
+        if artist:
+            await ctx.send(f"The animator(s) is: **{artist}**")
+        else:
+            await ctx.send("Could not find a valid Sakugabooru link or post.", delete_after=10)
+
+    async def who_context(self, interaction: discord.Interaction, message: discord.Message):
+        await interaction.response.defer()
+        
+        content = message.content
+        matches = re.findall(r'https?://(?:www\.)?sakugabooru\.com/\S+', content)
+        target_link = None
+        if matches:
+            target_link = matches[0]
+        elif message.embeds:
+            for embed in message.embeds:
+                if embed.url and "sakugabooru.com" in embed.url:
+                    target_link = embed.url
+                    break
+                if embed.video and embed.video.url and "sakugabooru.com" in embed.video.url:
+                    target_link = embed.video.url
+                    break
+        
+        if not target_link:
+            await interaction.followup.send("Could not find a Sakugabooru link in that message.", ephemeral=True)
+            return
+
+        artist = await self.get_artist_from_link(target_link)
+        if artist:
+            await interaction.followup.send(f"The animator(s) is: **{artist}**")
+        else:
+            await interaction.followup.send("Could not find a valid Sakugabooru post from the link.")
 
 async def setup(bot):
     await bot.add_cog(Info(bot))

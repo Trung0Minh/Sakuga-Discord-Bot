@@ -62,6 +62,36 @@ class SakugaAPI:
         return random.choice(unique_posts), None
 
     @staticmethod
+    async def get_post_by_id(session, post_id):
+        """
+        Fetches a post by its ID.
+        """
+        params = {
+            "tags": f"id:{post_id}"
+        }
+        data, error = await SakugaAPI.fetch_json(session, SakugaAPI.BASE_URL, params)
+        if error:
+            return None, error
+        if not data:
+            return None, "not_found"
+        return data[0], None
+
+    @staticmethod
+    async def get_post_by_md5(session, md5):
+        """
+        Fetches a post by its file MD5 hash.
+        """
+        params = {
+            "tags": f"md5:{md5}"
+        }
+        data, error = await SakugaAPI.fetch_json(session, SakugaAPI.BASE_URL, params)
+        if error:
+            return None, error
+        if not data:
+            return None, "not_found"
+        return data[0], None
+
+    @staticmethod
     async def get_artist_from_tags(session, tag_string):
         """
         Identifies artist tags from a post's tag string.
